@@ -1,3 +1,4 @@
+[![Static Web Page](https://github.com/SanderNF/mine-avganger/actions/workflows/pages/pages-build-deployment/badge.svg)](https://sandernf.github.io/mine-avganger/)
 # Mine avganger
 
 A personal real-time departure dashboard for public transport in Norway. Put the trains, metro, trams, buses and boats you care about on one screen, filtered down to exactly the lines, directions and platforms you use.
