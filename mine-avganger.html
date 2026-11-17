@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="nb">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mine avganger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #e7ebef;
+    --panel: #ffffff;
+    --ink: #0e1a2b;
+    --muted: #5a6779;
+    --rule: #dbe0e6;
+    --rule-input: #b8c2cd;
+    --field: #f6f8fa;
+    --hover: #e6edfb;
+    --band-bg: #0e1a2b;
+    --band-ink: #ffffff;
+    --accent: #1d4ed8;
+    --accent-ink: #ffffff;
+    --now: #ffd23f;
+    --now-ink: #0e1a2b;
+    --late: #b45309;
+    --danger: #c8102e;
+    --font: "Barlow Semi Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0a1424;
+      --panel: #12223a;
+      --ink: #eef2f7;
+      --muted: #97a6ba;
+      --rule: #22364f;
+      --rule-input: #3a5170;
+      --field: #0d1a2e;
+      --hover: #1d3352;
+      --band-bg: #1c3355;
+      --band-ink: #ffffff;
+      --accent: #7aa2ff;
+      --accent-ink: #0a1424;
+      --late: #fbbf24;
+      --danger: #ff6b7d;
+      color-scheme: dark;
+    }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 17px;
+    line-height: 1.35;
+    font-variant-numeric: tabular-nums;
+    min-height: 100vh;
+  }
+  button, input, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Header */
+  .top {
+    display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px;
+    max-width: 1440px; margin: 0 auto; padding: 28px clamp(16px, 4vw, 40px) 18px;
+  }
+  .title { margin: 0; font-size: clamp(1.7rem, 3.2vw, 2.4rem); font-weight: 700; line-height: 1.05; letter-spacing: -0.01em; }
+  body.editing .title { outline: 2px dashed var(--accent); outline-offset: 5px; border-radius: 2px; cursor: text; }
+  .date { margin: 6px 0 0; color: var(--muted); font-size: 1.05rem; }
+  .top-right { display: flex; align-items: center; gap: 22px; }
+  .clock { font-size: clamp(2.2rem, 5vw, 3.4rem); font-weight: 600; line-height: 1; letter-spacing: -0.01em; }
+  .clock .sec { color: var(--muted); font-size: 0.5em; font-weight: 500; margin-left: 2px; }
+
+  .btn { border: 1.5px solid var(--ink); background: transparent; border-radius: 6px; padding: 8px 16px; font-weight: 600; cursor: pointer; }
+  .btn.primary, .btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn.primary:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn.ghost { border-color: transparent; }
+
+  /* Grid of boards */
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
+    gap: 20px; align-items: start;
+    max-width: 1440px; margin: 0 auto; padding: 6px clamp(16px, 4vw, 40px) 48px;
+  }
+  @media (min-width: 840px) { .board.wide { grid-column: span 2; } }
+  .empty { grid-column: 1 / -1; color: var(--muted); text-align: center; padding: 48px 0; margin: 0; }
+
+  .board { background: var(--panel); border-radius: 8px; overflow: hidden; }
+  body.editing .board { outline: 2px dashed var(--rule-input); outline-offset: 3px; cursor: grab; }
+  .board.dragging { opacity: 0.4; }
+  .board.drop-target { outline-color: var(--accent) !important; outline-style: solid !important; }
+
+  .band {
+    background: var(--band-bg); color: var(--band-ink);
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+    padding: 14px 18px;
+  }
+  .board-title { margin: 0; font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
+  .board-sub { margin: 4px 0 0; font-size: 0.95rem; opacity: 0.8; }
+  .tools { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+  .tool {
+    background: transparent; color: var(--band-ink);
+    border: 1px solid rgba(255, 255, 255, 0.45); border-radius: 5px;
+    padding: 3px 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer;
+  }
+  .tool:disabled { opacity: 0.3; cursor: default; }
+  .tool.armed { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+  .cols, .row {
+    display: grid; grid-template-columns: 3.4em minmax(0, 1fr) 2.6em 4.8em;
+    gap: 12px; align-items: baseline; padding-left: 18px; padding-right: 18px;
+  }
+  .cols { font-size: 0.82rem; color: var(--muted); padding-top: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--rule); }
+  .cols span:nth-child(3) { text-align: center; }
+  .cols span:last-child { text-align: right; }
+  .rows { list-style: none; margin: 0; padding: 0; }
+  .row { padding-top: 11px; padding-bottom: 11px; border-bottom: 1px solid var(--rule); font-size: 1.15rem; }
+  .row:last-child { border-bottom: 0; }
+  .badge {
+    justify-self: start; min-width: 2.9em; text-align: center;
+    padding: 2px 6px; border-radius: 4px; color: #fff; font-weight: 700; font-size: 0.95rem; line-height: 1.35;
+  }
+  .dest { font-weight: 500; overflow-wrap: anywhere; }
+  .note { display: block; font-size: 0.82rem; font-weight: 400; color: var(--muted); }
+  .plat { text-align: center; font-weight: 600; }
+  .time { text-align: right; font-weight: 700; white-space: nowrap; }
+  .time.now .t-main { background: var(--now); color: var(--now-ink); padding: 1px 8px; border-radius: 4px; }
+  .time .late { color: var(--late); }
+  .time.cancelled { color: var(--danger); }
+  .is-cancelled { text-decoration: line-through; opacity: 0.6; }
+  .board-msg { margin: 0; padding: 24px 18px; color: var(--muted); }
+  .board-meta { margin: 0; padding: 8px 18px 12px; font-size: 0.82rem; color: var(--muted); border-top: 1px solid var(--rule); }
+
+  .add-tile {
+    min-height: 200px; border: 2px dashed var(--rule-input); border-radius: 8px; background: transparent;
+    color: var(--muted); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    font-weight: 600; font-size: 1.1rem; cursor: pointer;
+  }
+  .add-tile:hover { border-color: var(--accent); color: var(--accent); }
+  .add-tile .plus { font-size: 2.4rem; line-height: 1; font-weight: 500; }
+
+  /* Editor dialog */
+  .editor {
+    width: min(560px, calc(100% - 24px)); max-height: calc(100dvh - 24px);
+    border: 0; border-radius: 10px; padding: 0; background: var(--panel); color: var(--ink);
+  }
+  .editor[open] { display: flex; flex-direction: column; }
+  .editor::backdrop { background: rgba(5, 12, 24, 0.55); }
+  .editor-inner { padding: 22px 22px 6px; overflow: auto; }
+  .editor h2 { margin: 0 0 18px; font-size: 1.6rem; line-height: 1.1; }
+  .field { margin: 0 0 18px; padding: 0; border: 0; min-width: 0; }
+  .field > label, .field > legend { display: block; font-weight: 600; margin: 0 0 6px; padding: 0; }
+  .opt { font-weight: 400; color: var(--muted); }
+  .field input, .field select {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--rule-input); border-radius: 6px; background: var(--field);
+  }
+  .combo-box { position: relative; }
+  .results {
+    position: absolute; top: 100%; left: 0; right: 0; z-index: 5;
+    margin: 4px 0 0; padding: 4px; list-style: none; max-height: 260px; overflow: auto;
+    background: var(--panel); border: 1px solid var(--rule-input); border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  }
+  .results li { display: flex; justify-content: space-between; gap: 12px; padding: 9px 10px; border-radius: 4px; cursor: pointer; }
+  .results li:hover, .results li[aria-selected="true"] { background: var(--hover); }
+  .results small { color: var(--muted); text-align: right; font-size: 0.88rem; }
+  .hint { margin: 6px 0 0; font-size: 0.9rem; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { padding: 5px 12px; border: 1px solid var(--rule-input); border-radius: 999px; background: transparent; font-size: 0.98rem; font-weight: 500; cursor: pointer; }
+  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .editor-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--rule); }
+</style>
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1 class="title" spellcheck="false">Mine avganger</h1>
+      <p class="date"></p>
+    </div>
+    <div class="top-right">
+      <div class="clock" aria-hidden="true"><span class="hm"></span><span class="sec"></span></div>
+      <button type="button" class="btn edit-toggle" aria-pressed="false">Rediger</button>
+    </div>
+  </header>
+
+  <main class="grid" aria-label="Avgangstavler"></main>
+
+  <dialog class="editor" aria-labelledby="editor-heading">
+    <div class="editor-inner">
+      <h2 id="editor-heading">Ny tavle</h2>
+
+      <div class="field">
+        <label for="stop-input">Stoppested</label>
+        <div class="combo-box">
+          <input id="stop-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false"
+                 aria-controls="stop-results" autocomplete="off" spellcheck="false" placeholder="Søk etter stasjon eller holdeplass">
+          <ul id="stop-results" class="results" role="listbox" hidden></ul>
+        </div>
+        <p class="hint" id="stop-status" role="status"></p>
+      </div>
+
+      <div class="field">
+        <label for="title-input">Navn på tavla <span class="opt">(valgfritt)</span></label>
+        <input id="title-input" type="text" placeholder="For eksempel «Til jobb»">
+      </div>
+
+      <fieldset class="field" data-kind="modes" hidden><legend>Transport</legend><div class="chips"></div></fieldset>
+      <fieldset class="field" data-kind="lines" hidden><legend>Linjer</legend><div class="chips"></div></fieldset>
+      <fieldset class="field" data-kind="platforms" hidden><legend>Spor og plattformer</legend><div class="chips"></div></fieldset>
+      <p class="hint" id="filter-hint" style="margin: -8px 0 18px;"></p>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="rows-select">Antall avganger</label>
+          <select id="rows-select">
+            <option value="5">5</option><option value="8">8</option><option value="12">12</option><option value="20">20</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="width-select">Bredde</label>
+          <select id="width-select"><option value="normal">Vanlig</option><option value="wide">Bred</option></select>
+        </div>
+      </div>
+    </div>
+    <div class="editor-actions">
+      <button type="button" class="btn ghost" data-act="cancel">Avbryt</button>
+      <button type="button" class="btn primary" data-act="save">Lagre tavle</button>
+    </div>
+  </dialog>
+
+<script>
+(() => {
+  // Entur ber alle brukere sende et navn på formen firma-applikasjon.
+  const CLIENT_NAME = "privat-avgangstavle";
+  const JOURNEY_PLANNER = "https://api.entur.io/journey-planner/v3/graphql";
+  const GEOCODER = "https://api.entur.io/geocoder/v1/autocomplete";
+  const STORE_KEY = "mine-avganger:v1";
+  const REFRESH_MS = 30000;
+
+  const MODES = {
+    rail: { name: "Tog", color: "#00824a" },
+    metro: { name: "T-bane", color: "#d9640a" },
+    tram: { name: "Trikk", color: "#0b78c8" },
+    bus: { name: "Buss", color: "#d40d0d" },
+    coach: { name: "Ekspressbuss", color: "#5a7d00" },
+    water: { name: "Båt", color: "#682c88" },
+    air: { name: "Fly", color: "#4b5563" },
+  };
+  const MODE_ORDER = Object.keys(MODES);
+  const CATEGORY_MODE = {
+    railStation: "rail", metroStation: "metro", tramStation: "tram", onstreetTram: "tram",
+    busStation: "bus", onstreetBus: "bus", coachStation: "coach",
+    ferryStop: "water", harbourPort: "water", ferryPort: "water", airport: "air",
+  };
+
+  const QUERY = `query ($id: String!, $n: Int!) {
+    stopPlace(id: $id) {
+      name
+      estimatedCalls(numberOfDepartures: $n, timeRange: 43200) {
+        aimedDepartureTime
+        expectedDepartureTime
+        realtime
+        cancellation
+        destinationDisplay { frontText }
+        quay { publicCode }
+        serviceJourney { line { publicCode transportMode } }
+        situations { summary { value language } }
+      }
+    }
+  }`;
+
+  // ---------- helpers ----------
+  const $ = (sel, el = document) => el.querySelector(sel);
+  function h(tag, props = {}, ...children) {
+    const el = document.createElement(tag);
+    for (const [key, value] of Object.entries(props)) {
+      if (value === false || value == null) continue;
+      if (key === "class") el.className = value;
+      else if (key === "text") el.textContent = value;
+      else if (key.startsWith("on")) el.addEventListener(key.slice(2), value);
+      else el.setAttribute(key, value === true ? "" : value);
+    }
+    el.append(...children.filter(c => c != null && c !== false));
+    return el;
+  }
+  const uid = () => Math.random().toString(36).slice(2, 10);
+  const clock = date => date.toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" });
+  const byNatural = (a, b) => a.localeCompare(b, "nb", { numeric: true });
+  const lineCode = call => (call.serviceJourney?.line?.publicCode || "").toUpperCase();
+  const modeOf = call => call.serviceJourney?.line?.transportMode || "";
+  const platformOf = call => call.quay?.publicCode || "";
+
+  function passes(call, f, skip) {
+    if (skip !== "modes" && f.modes.length && !f.modes.includes(modeOf(call))) return false;
+    if (skip !== "lines" && f.lines.length && !f.lines.includes(lineCode(call))) return false;
+    if (skip !== "platforms" && f.platforms.length && !f.platforms.includes(platformOf(call))) return false;
+    return true;
+  }
+
+  // ---------- config ----------
+  function newBoard(overrides = {}) {
+    return { id: uid(), stopId: "", stopName: "", title: "", modes: [], lines: [], platforms: [], rows: 8, wide: false, ...overrides };
+  }
+  function loadConfig() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORE_KEY));
+      if (saved && Array.isArray(saved.boards)) return { title: saved.title || "Mine avganger", boards: saved.boards.map(b => newBoard(b)) };
+    } catch {}
+    return { title: "Mine avganger", boards: [newBoard({ stopId: "NSR:StopPlace:337", stopName: "Oslo S" })] };
+  }
+  function saveConfig() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(config)); } catch {}
+  }
+  let config = loadConfig();
+
+  // ---------- data ----------
+  const stops = new Map(); // stopId -> { name, calls, updated, error }
+
+  async function fetchStop(id) {
+    const entry = stops.get(id) || { name: "", calls: [], updated: null, error: "" };
+    stops.set(id, entry);
+    try {
+      const response = await fetch(JOURNEY_PLANNER, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "ET-Client-Name": CLIENT_NAME },
+        body: JSON.stringify({ query: QUERY, variables: { id, n: 200 } }),
+      });
+      const json = await response.json();
+      const stop = json.data?.stopPlace;
+      if (!stop) throw new Error(json.errors?.[0]?.message || "fant ikke stoppestedet");
+      entry.name = stop.name;
+      entry.calls = stop.estimatedCalls || [];
+      entry.updated = new Date();
+      entry.error = "";
+    } catch (error) {
+      entry.error = "Fikk ikke hentet avganger (" + error.message + "). Prøver igjen om litt.";
+    }
+    return entry;
+  }
+
+  async function refreshAll() {
+    const ids = [...new Set(config.boards.map(b => b.stopId).filter(Boolean))];
+    await Promise.all(ids.map(fetchStop));
+    renderBoards();
+  }
+
+  // ---------- boards ----------
+  const grid = $(".grid");
+  let editing = false;
+  let dragId = null;
+
+  function filterSummary(board, entry) {
+    const parts = [];
+    const stopName = entry?.name || board.stopName;
+    if (board.title && stopName) parts.push(stopName);
+    if (board.modes.length) parts.push(board.modes.map(m => MODES[m]?.name || m).join(", "));
+    if (board.lines.length) parts.push((board.lines.length > 1 ? "Linje " : "Linje ") + board.lines.join(", "));
+    if (board.platforms.length) parts.push("Spor " + board.platforms.join(", "));
+    return parts.join(". ");
+  }
+
+  function rowEl(call) {
+    const expected = new Date(call.expectedDepartureTime);
+    const aimed = new Date(call.aimedDepartureTime);
+    const minutes = Math.round((expected - Date.now()) / 60000);
+    const delayed = expected - aimed >= 60000;
+    const line = call.serviceJourney?.line;
+    const mode = MODES[modeOf(call)];
+
+    let time;
+    if (call.cancellation) {
+      time = h("span", { class: "time cancelled" }, h("span", { text: "Innstilt" }), h("s", { class: "note", text: clock(aimed) }));
+    } else {
+      const label = minutes <= 0 ? "Nå" : minutes < 10 ? minutes + " min" : clock(expected);
+      time = h("span", { class: "time" + (minutes <= 0 ? " now" : "") },
+        h("span", { class: "t-main", text: label }),
+        delayed ? h("span", { class: "note late", text: "Rute " + clock(aimed) }) : null);
+    }
+
+    const message = (call.situations || [])
+      .map(s => (s.summary || []).find(t => t.language === "no" || t.language === "nob") || s.summary?.[0])
+      .find(Boolean);
+
+    const badge = h("span", { class: "badge", title: mode ? mode.name : "", text: line?.publicCode || "–" });
+    badge.style.background = mode ? mode.color : "#4b5563";
+
+    return h("li", { class: "row" },
+      badge,
+      h("span", { class: "dest" + (call.cancellation ? " is-cancelled" : "") },
+        call.destinationDisplay?.frontText || "",
+        message?.value ? h("span", { class: "note", text: message.value }) : null),
+      h("span", { class: "plat", text: platformOf(call) || "–" }),
+      time);
+  }
+
+  function removeButton(board) {
+    const button = h("button", { type: "button", class: "tool", text: "Fjern" });
+    let timer = null;
+    button.addEventListener("click", () => {
+      if (!timer) {
+        button.textContent = "Fjern tavla?";
+        button.classList.add("armed");
+        timer = setTimeout(() => { timer = null; button.textContent = "Fjern"; button.classList.remove("armed"); }, 3000);
+        return;
+      }
+      clearTimeout(timer);
+      config.boards = config.boards.filter(b => b.id !== board.id);
+      saveConfig();
+      renderBoards();
+    });
+    return button;
+  }
+
+  function move(index, step) {
+    const target = index + step;
+    if (target < 0 || target >= config.boards.length) return;
+    const [board] = config.boards.splice(index, 1);
+    config.boards.splice(target, 0, board);
+    saveConfig();
+    renderBoards();
+    // Keep keyboard focus on the moved board's matching arrow.
+    const moved = grid.querySelector(`[data-id="${board.id}"] [data-move="${step}"]`);
+    if (moved && !moved.disabled) moved.focus();
+  }
+
+  function setupDrag(section, id) {
+    section.draggable = true;
+    section.addEventListener("dragstart", event => {
+      dragId = id;
+      section.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", id);
+    });
+    section.addEventListener("dragend", () => { dragId = null; renderBoards(); });
+    section.addEventListener("dragover", event => {
+      if (!dragId || dragId === id) return;
+      event.preventDefault();
+      section.classList.add("drop-target");
+    });
+    section.addEventListener("dragleave", () => section.classList.remove("drop-target"));
+    section.addEventListener("drop", event => {
+      event.preventDefault();
+      if (!dragId || dragId === id) return;
+      const from = config.boards.findIndex(b => b.id === dragId);
+      const to = config.boards.findIndex(b => b.id === id);
+      const [board] = config.boards.splice(from, 1);
+      config.boards.splice(to, 0, board);
+      saveConfig();
+      dragId = null;
+      renderBoards();
+    });
+  }
+
+  function boardEl(board, index) {
+    const entry = stops.get(board.stopId);
+    const name = board.title || entry?.name || board.stopName || "Stoppested";
+    const sub = filterSummary(board, entry);
+
+    const tools = editing ? h("div", { class: "tools" },
+      h("button", { type: "button", class: "tool", "data-move": "-1", "aria-label": "Flytt tavla bakover", title: "Flytt bakover",
+        disabled: index === 0, onclick: () => move(index, -1), text: "←" }),
+      h("button", { type: "button", class: "tool", "data-move": "1", "aria-label": "Flytt tavla fremover", title: "Flytt fremover",
+        disabled: index === config.boards.length - 1, onclick: () => move(index, 1), text: "→" }),
+      h("button", { type: "button", class: "tool", onclick: () => openEditor(board), text: "Endre" }),
+      removeButton(board)) : null;
+
+    let body;
+    let calls = [];
+    if (!entry || (!entry.updated && !entry.error)) {
+      body = h("p", { class: "board-msg", text: "Henter avganger …" });
+    } else {
+      const cutoff = Date.now() - 60000;
+      calls = entry.calls.filter(c => new Date(c.expectedDepartureTime) >= cutoff && passes(c, board)).slice(0, board.rows);
+      body = calls.length
+        ? h("ol", { class: "rows" }, ...calls.map(rowEl))
+        : h("p", { class: "board-msg", text: entry.error && !entry.calls.length
+            ? "Ingen avganger å vise akkurat nå."
+            : "Ingen avganger de neste 12 timene med disse filtrene." });
+    }
+
+    const section = h("section", { class: "board" + (board.wide ? " wide" : ""), "data-id": board.id, "aria-label": name },
+      h("header", { class: "band" },
+        h("div", {}, h("h2", { class: "board-title", text: name }), sub ? h("p", { class: "board-sub", text: sub }) : null),
+        tools),
+      calls.length ? h("div", { class: "cols", "aria-hidden": "true" },
+        h("span", { text: "Linje" }), h("span", { text: "Til" }), h("span", { text: "Spor" }), h("span", { text: "Avgang" })) : null,
+      body,
+      h("p", { class: "board-meta", text: entry?.error || (entry?.updated ? "Sanntid fra Entur, oppdatert " + clock(entry.updated) : "") }));
+
+    if (editing) setupDrag(section, board.id);
+    return section;
+  }
+
+  function renderBoards() {
+    if (dragId) return; // don't rebuild under a drag in progress
+    const items = config.boards.map(boardEl);
+    if (editing) {
+      items.push(h("button", { type: "button", class: "add-tile", onclick: () => openEditor(null) },
+        h("span", { class: "plus", "aria-hidden": "true", text: "+" }), h("span", { text: "Legg til tavle" })));
+    } else if (!config.boards.length) {
+      items.push(h("p", { class: "empty", text: "Ingen tavler ennå. Trykk «Rediger» for å legge til en." }));
+    }
+    grid.replaceChildren(...items);
+  }
+
+  // ---------- header: title, clock, edit mode ----------
+  const titleEl = $(".title");
+  const editBtn = $(".edit-toggle");
+  titleEl.textContent = config.title;
+  document.title = config.title;
+
+  titleEl.addEventListener("keydown", event => {
+    if (event.key === "Enter") { event.preventDefault(); titleEl.blur(); }
+  });
+  titleEl.addEventListener("blur", () => {
+    config.title = titleEl.textContent.trim() || "Mine avganger";
+    titleEl.textContent = config.title;
+    document.title = config.title;
+    saveConfig();
+  });
+
+  editBtn.addEventListener("click", () => {
+    editing = !editing;
+    document.body.classList.toggle("editing", editing);
+    editBtn.textContent = editing ? "Ferdig" : "Rediger";
+    editBtn.setAttribute("aria-pressed", String(editing));
+    titleEl.contentEditable = editing ? "true" : "false";
+    renderBoards();
+  });
+
+  function tick() {
+    const now = new Date();
+    $(".clock .hm").textContent = clock(now);
+    $(".clock .sec").textContent = ":" + String(now.getSeconds()).padStart(2, "0");
+    const date = now.toLocaleDateString("nb-NO", { weekday: "long", day: "numeric", month: "long" });
+    $(".date").textContent = date.charAt(0).toUpperCase() + date.slice(1);
+  }
+
+  // ---------- editor dialog ----------
+  const dialog = $(".editor");
+  const heading = $("#editor-heading");
+  const stopInput = $("#stop-input");
+  const results = $("#stop-results");
+  const stopStatus = $("#stop-status");
+  const titleInput = $("#title-input");
+  const rowsSelect = $("#rows-select");
+  const widthSelect = $("#width-select");
+  const filterHint = $("#filter-hint");
+  const saveBtn = $('[data-act="save"]', dialog);
+  let draft = null;
+
+  const CHIP_KINDS = [
+    ["modes", modeOf, v => MODES[v]?.name || v, (a, b) => MODE_ORDER.indexOf(a) - MODE_ORDER.indexOf(b)],
+    ["lines", lineCode, v => v, byNatural],
+    ["platforms", platformOf, v => v, byNatural],
+  ];
+
+  function renderDraftChips() {
+    const entry = draft.stopId ? stops.get(draft.stopId) : null;
+    const calls = entry?.calls || [];
+    for (const [kind, valueOf, labelOf, sort] of CHIP_KINDS) {
+      const fieldset = dialog.querySelector(`[data-kind="${kind}"]`);
+      const values = new Set(draft[kind]);
+      calls.filter(c => passes(c, draft, kind)).forEach(c => { const v = valueOf(c); if (v) values.add(v); });
+      const sorted = [...values].sort(sort);
+      fieldset.querySelector(".chips").replaceChildren(...sorted.map(value => {
+        const on = draft[kind].includes(value);
+        return h("button", { type: "button", class: "chip", "aria-pressed": String(on), text: labelOf(value),
+          onclick: () => {
+            draft[kind] = on ? draft[kind].filter(x => x !== value) : [...draft[kind], value];
+            renderDraftChips();
+          } });
+      }));
+      fieldset.hidden = sorted.length === 0;
+    }
+    filterHint.textContent = !draft.stopId
+      ? "Velg et stoppested, så kan du filtrere på transport, linjer og spor."
+      : !entry || (!entry.updated && !entry.error)
+        ? "Henter linjer og spor …"
+        : entry.error && !calls.length
+          ? "Fikk ikke hentet linjer og spor akkurat nå."
+          : "Trykk for å velge. Velger du ingen, vises alt.";
+  }
+
+  function loadDraftOptions(id) {
+    const entry = stops.get(id);
+    if (entry?.updated) return;
+    fetchStop(id).then(() => { if (dialog.open && draft?.stopId === id) renderDraftChips(); });
+  }
+
+  function openEditor(board) {
+    draft = board
+      ? { ...board, modes: [...board.modes], lines: [...board.lines], platforms: [...board.platforms] }
+      : newBoard();
+    heading.textContent = board ? "Endre tavle" : "Ny tavle";
+    saveBtn.textContent = board ? "Lagre endringer" : "Legg til tavle";
+    stopInput.value = draft.stopName || stops.get(draft.stopId)?.name || "";
+    titleInput.value = draft.title;
+    rowsSelect.value = String(draft.rows);
+    widthSelect.value = draft.wide ? "wide" : "normal";
+    closeList();
+    renderDraftChips();
+    saveBtn.disabled = !draft.stopId;
+    dialog.showModal();
+    if (draft.stopId) loadDraftOptions(draft.stopId);
+    else stopInput.focus();
+  }
+
+  $('[data-act="cancel"]', dialog).addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); });
+  dialog.addEventListener("cancel", event => {
+    if (!results.hidden) { event.preventDefault(); restoreInput(); }
+  });
+
+  saveBtn.addEventListener("click", () => {
+    if (!draft?.stopId) return;
+    draft.title = titleInput.value.trim();
+    draft.rows = Number(rowsSelect.value);
+    draft.wide = widthSelect.value === "wide";
+    const index = config.boards.findIndex(b => b.id === draft.id);
+    if (index >= 0) config.boards[index] = draft;
+    else config.boards.push(draft);
+    saveConfig();
+    dialog.close();
+    renderBoards();
+    if (!stops.get(draft.stopId)?.updated) fetchStop(draft.stopId).then(renderBoards);
+  });
+
+  // Stop search combobox
+  let matches = [];
+  let active = -1;
+  let searchTimer;
+  let searchSeq = 0;
+
+  function closeList() {
+    results.hidden = true;
+    stopInput.setAttribute("aria-expanded", "false");
+    stopInput.removeAttribute("aria-activedescendant");
+    active = -1;
+    stopStatus.textContent = "";
+  }
+
+  function highlight(index) {
+    active = index;
+    Array.from(results.children).forEach((option, i) => option.setAttribute("aria-selected", String(i === active)));
+    if (active >= 0) {
+      stopInput.setAttribute("aria-activedescendant", results.children[active].id);
+      results.children[active].scrollIntoView({ block: "nearest" });
+    } else {
+      stopInput.removeAttribute("aria-activedescendant");
+    }
+  }
+
+  function showMatches() {
+    results.replaceChildren(...matches.map((place, index) => {
+      const kinds = [...new Set((place.category || []).map(c => MODES[CATEGORY_MODE[c]]?.name).filter(Boolean))];
+      const option = h("li", { id: "stop-option-" + index, role: "option", "aria-selected": "false" },
+        h("span", { text: place.name }),
+        h("small", { text: [kinds.join(", "), place.locality].filter(Boolean).join(", ") }));
+      option.addEventListener("mousedown", event => event.preventDefault());
+      option.addEventListener("click", () => choose(place));
+      return option;
+    }));
+    results.hidden = matches.length === 0;
+    stopInput.setAttribute("aria-expanded", String(matches.length > 0));
+    highlight(-1);
+    stopStatus.textContent = matches.length ? "" : "Fant ingen stoppesteder med det navnet.";
+  }
+
+  async function search(text) {
+    const seq = ++searchSeq;
+    try {
+      const url = GEOCODER + "?" + new URLSearchParams({ text, layers: "venue", size: "12", lang: "no" });
+      const response = await fetch(url, { headers: { "ET-Client-Name": CLIENT_NAME } });
+      const json = await response.json();
+      if (seq !== searchSeq) return;
+      matches = (json.features || [])
+        .map(feature => feature.properties)
+        .filter(place => place.id && place.id.startsWith("NSR:StopPlace:"));
+      showMatches();
+    } catch {
+      if (seq === searchSeq) stopStatus.textContent = "Søket feilet. Sjekk nettforbindelsen og prøv igjen.";
+    }
+  }
+
+  function choose(place) {
+    stopInput.value = place.name;
+    closeList();
+    if (place.id === draft.stopId) return;
+    draft.stopId = place.id;
+    draft.stopName = place.name;
+    draft.lines = [];
+    draft.platforms = [];
+    saveBtn.disabled = false;
+    renderDraftChips();
+    loadDraftOptions(place.id);
+  }
+
+  function restoreInput() {
+    stopInput.value = draft?.stopName || "";
+    searchSeq++;
+    closeList();
+  }
+
+  stopInput.addEventListener("focus", () => stopInput.select());
+  stopInput.addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    const text = stopInput.value.trim();
+    if (text.length < 2) { searchSeq++; closeList(); return; }
+    searchTimer = setTimeout(() => search(text), 250);
+  });
+  stopInput.addEventListener("keydown", event => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (results.hidden || !matches.length) return;
+      event.preventDefault();
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      highlight(active < 0 ? (step > 0 ? 0 : matches.length - 1) : (active + step + matches.length) % matches.length);
+    } else if (event.key === "Enter" && !results.hidden) {
+      event.preventDefault();
+      if (active >= 0) choose(matches[active]);
+      else if (matches.length === 1) choose(matches[0]);
+    } else if (event.key === "Escape" && !results.hidden) {
+      event.preventDefault();
+      restoreInput();
+    }
+  });
+  stopInput.addEventListener("blur", () => {
+    setTimeout(() => { if (document.activeElement !== stopInput && dialog.open) restoreInput(); }, 150);
+  });
+
+  // ---------- start ----------
+  tick();
+  setInterval(tick, 1000);
+  renderBoards();
+  refreshAll();
+  setInterval(() => { if (!document.hidden) refreshAll(); }, REFRESH_MS);
+  setInterval(() => { if (!document.hidden) renderBoards(); }, 15000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshAll(); });
+})();
+</script>
+</body>
+</html>
