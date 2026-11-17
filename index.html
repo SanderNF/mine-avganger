@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mine avganger</title>
+<meta name="description" content="Din egen sanntids avgangstavle for tog, T-bane, trikk, buss og båt i Norge, med data fra Entur.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -76,6 +77,7 @@
   .clock .sec { color: var(--muted); font-size: 0.5em; font-weight: 500; margin-left: 2px; }
 
   .btn { border: 1.5px solid var(--ink); background: transparent; border-radius: 6px; padding: 8px 16px; font-weight: 600; cursor: pointer; }
+  a.btn { display: inline-block; text-decoration: none; }
   .btn.primary, .btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   .btn.primary:disabled { opacity: 0.45; cursor: not-allowed; }
   .btn.ghost { border-color: transparent; }
@@ -171,6 +173,10 @@
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip { padding: 5px 12px; border: 1px solid var(--rule-input); border-radius: 999px; background: transparent; font-size: 0.98rem; font-weight: 500; cursor: pointer; }
   .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .field-label { display: block; font-weight: 600; margin: 0 0 6px; }
+  .line-dests { display: grid; gap: 8px; }
+  .ld-row { display: grid; grid-template-columns: 4.5em minmax(0, 1fr); gap: 10px; align-items: center; }
+  .ld-code { font-weight: 700; }
   .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .editor-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--rule); }
 </style>
@@ -183,6 +189,7 @@
     </div>
     <div class="top-right">
       <div class="clock" aria-hidden="true"><span class="hm"></span><span class="sec"></span></div>
+      <a class="btn repo-link" target="_blank" rel="noopener" hidden>GitHub</a>
       <button type="button" class="btn edit-toggle" aria-pressed="false">Rediger</button>
     </div>
   </header>
@@ -210,6 +217,10 @@
 
       <fieldset class="field" data-kind="modes" hidden><legend>Transport</legend><div class="chips"></div></fieldset>
       <fieldset class="field" data-kind="lines" hidden><legend>Linjer</legend><div class="chips"></div></fieldset>
+      <div class="field" data-linedest hidden>
+        <span class="field-label">Retning per linje</span>
+        <div class="line-dests"></div>
+      </div>
       <fieldset class="field" data-kind="platforms" hidden><legend>Spor og plattformer</legend><div class="chips"></div></fieldset>
       <p class="hint" id="filter-hint" style="margin: -8px 0 18px;"></p>
 
@@ -240,6 +251,9 @@
   const GEOCODER = "https://api.entur.io/geocoder/v1/autocomplete";
   const STORE_KEY = "mine-avganger:v1";
   const REFRESH_MS = 30000;
+  // Lenke til GitHub-repoet. På GitHub Pages finnes den automatisk; ellers fyll inn her,
+  // f.eks. "https://github.com/brukernavn/mine-avganger". Tomt = knappen skjules.
+  const REPO_URL = "https://github.com/sandernf/mine-avganger";
 
   const MODES = {
     rail: { name: "Tog", color: "#00824a" },
@@ -293,17 +307,20 @@
   const lineCode = call => (call.serviceJourney?.line?.publicCode || "").toUpperCase();
   const modeOf = call => call.serviceJourney?.line?.transportMode || "";
   const platformOf = call => call.quay?.publicCode || "";
+  const destOf = call => (call.destinationDisplay?.frontText || "").trim();
 
   function passes(call, f, skip) {
     if (skip !== "modes" && f.modes.length && !f.modes.includes(modeOf(call))) return false;
     if (skip !== "lines" && f.lines.length && !f.lines.includes(lineCode(call))) return false;
+    if (skip !== "lines" && f.lineDest[lineCode(call)] && f.lineDest[lineCode(call)] !== destOf(call)) return false;
     if (skip !== "platforms" && f.platforms.length && !f.platforms.includes(platformOf(call))) return false;
     return true;
   }
 
   // ---------- config ----------
   function newBoard(overrides = {}) {
-    return { id: uid(), stopId: "", stopName: "", title: "", modes: [], lines: [], platforms: [], rows: 8, wide: false, ...overrides };
+    return { id: uid(), stopId: "", stopName: "", title: "", modes: [], lines: [], platforms: [], rows: 8, wide: false, ...overrides,
+      lineDest: { ...(overrides.lineDest || {}) } };
   }
   function loadConfig() {
     try {
@@ -358,7 +375,8 @@
     const stopName = entry?.name || board.stopName;
     if (board.title && stopName) parts.push(stopName);
     if (board.modes.length) parts.push(board.modes.map(m => MODES[m]?.name || m).join(", "));
-    if (board.lines.length) parts.push((board.lines.length > 1 ? "Linje " : "Linje ") + board.lines.join(", "));
+    if (board.lines.length) parts.push("Linje " + board.lines
+      .map(l => board.lineDest[l] ? l + " mot " + board.lineDest[l] : l).join(", "));
     if (board.platforms.length) parts.push("Spor " + board.platforms.join(", "));
     return parts.join(". ");
   }
@@ -572,18 +590,41 @@
         return h("button", { type: "button", class: "chip", "aria-pressed": String(on), text: labelOf(value),
           onclick: () => {
             draft[kind] = on ? draft[kind].filter(x => x !== value) : [...draft[kind], value];
+            if (kind === "lines" && on) delete draft.lineDest[value];
             renderDraftChips();
           } });
       }));
       fieldset.hidden = sorted.length === 0;
     }
+    renderLineDests(calls);
     filterHint.textContent = !draft.stopId
-      ? "Velg et stoppested, så kan du filtrere på transport, linjer og spor."
+      ? "Velg et stoppested, så kan du filtrere på transport, linjer og spor. Velger du linjer, kan du også velge retning for hver av dem."
       : !entry || (!entry.updated && !entry.error)
         ? "Henter linjer og spor …"
         : entry.error && !calls.length
           ? "Fikk ikke hentet linjer og spor akkurat nå."
           : "Trykk for å velge. Velger du ingen, vises alt.";
+  }
+
+  function renderLineDests(calls) {
+    const wrap = dialog.querySelector("[data-linedest]");
+    const lines = [...draft.lines].sort(byNatural);
+    wrap.querySelector(".line-dests").replaceChildren(...lines.map((line, i) => {
+      const options = new Set();
+      calls.filter(c => lineCode(c) === line && passes(c, draft, "lines")).forEach(c => { const d = destOf(c); if (d) options.add(d); });
+      if (draft.lineDest[line]) options.add(draft.lineDest[line]);
+      const select = h("select", { id: "ld-" + i },
+        h("option", { value: "", text: "Alle retninger" }),
+        ...[...options].sort(byNatural).map(d => h("option", { value: d, text: d })));
+      select.value = draft.lineDest[line] || "";
+      select.addEventListener("change", () => {
+        if (select.value) draft.lineDest[line] = select.value;
+        else delete draft.lineDest[line];
+        renderDraftChips();
+      });
+      return h("div", { class: "ld-row" }, h("label", { class: "ld-code", for: "ld-" + i, text: line }), select);
+    }));
+    wrap.hidden = lines.length === 0;
   }
 
   function loadDraftOptions(id) {
@@ -594,7 +635,7 @@
 
   function openEditor(board) {
     draft = board
-      ? { ...board, modes: [...board.modes], lines: [...board.lines], platforms: [...board.platforms] }
+      ? { ...board, modes: [...board.modes], lines: [...board.lines], lineDest: { ...board.lineDest }, platforms: [...board.platforms] }
       : newBoard();
     heading.textContent = board ? "Endre tavle" : "Ny tavle";
     saveBtn.textContent = board ? "Lagre endringer" : "Legg til tavle";
@@ -694,6 +735,7 @@
     draft.stopId = place.id;
     draft.stopName = place.name;
     draft.lines = [];
+    draft.lineDest = {};
     draft.platforms = [];
     saveBtn.disabled = false;
     renderDraftChips();
@@ -731,6 +773,22 @@
   stopInput.addEventListener("blur", () => {
     setTimeout(() => { if (document.activeElement !== stopInput && dialog.open) restoreInput(); }, 150);
   });
+
+  // ---------- GitHub button ----------
+  function findRepoUrl() {
+    if (REPO_URL) return REPO_URL;
+    const pages = location.hostname.match(/^([^.]+)\.github\.io$/i);
+    if (!pages) return "";
+    const first = location.pathname.split("/").filter(Boolean)[0];
+    const repo = first && !first.includes(".") ? first : pages[1] + ".github.io";
+    return "https://github.com/" + pages[1] + "/" + repo;
+  }
+  const repoLink = $(".repo-link");
+  const repoUrl = findRepoUrl();
+  if (repoUrl) {
+    repoLink.href = repoUrl;
+    repoLink.hidden = false;
+  }
 
   // ---------- start ----------
   tick();
