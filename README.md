@@ -64,6 +64,10 @@ These constants are at the top of the script in the HTML file:
 | `REPO_URL` | Link for the GitHub button. Set to `https://github.com/sandernf/mine-avganger`; empty means automatic detection on GitHub Pages. |
 | `REFRESH_MS` | How often departures are fetched, in milliseconds. Default `30000`. |
 
+## Testing future departures
+
+Add `?nday=<days>` to the address to see the dashboard as it will look that many days from now, for example `index.html?nday=3` or `https://sandernf.github.io/mine-avganger/?nday=7`. The clock, date, countdowns and all departures move ahead by that many whole days (0 to 365), and a yellow label in the header shows that test mode is on. Departures that far ahead have planned times only, not real-time data. Remove the parameter to go back to live departures.
+
 ## Data source
 
 - Departures: [Entur Journey Planner v3](https://developer.entur.no/docs/open-services/journey-planner) (GraphQL).

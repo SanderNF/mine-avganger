@@ -84,6 +84,10 @@
   .title { margin: 0; font-size: clamp(1.7rem, 3.2vw, 2.4rem); font-weight: 700; line-height: 1.05; letter-spacing: -0.01em; }
   body.editing .title { outline: 2px dashed var(--accent); outline-offset: 5px; border-radius: 2px; cursor: text; }
   .date { margin: 6px 0 0; color: var(--muted); font-size: 1.05rem; }
+  .test-mode {
+    display: inline-block; margin: 10px 0 0; padding: 3px 10px; border-radius: 4px;
+    background: var(--now); color: var(--now-ink); font-size: 0.95rem; font-weight: 600;
+  }
   .top-right { display: flex; align-items: center; gap: 22px; }
   .clock { font-size: clamp(2.2rem, 5vw, 3.4rem); font-weight: 600; line-height: 1; letter-spacing: -0.01em; }
   .clock .sec { color: var(--muted); font-size: 0.5em; font-weight: 500; margin-left: 2px; }
@@ -218,6 +222,7 @@
     <div>
       <h1 class="title" spellcheck="false">Mine avganger</h1>
       <p class="date"></p>
+      <p class="test-mode" hidden></p>
     </div>
     <div class="top-right">
       <div class="clock" aria-hidden="true"><span class="hm"></span><span class="sec"></span></div>
@@ -319,6 +324,15 @@
   // f.eks. "https://github.com/brukernavn/mine-avganger". Tomt = knappen skjules.
   const REPO_URL = "https://github.com/sandernf/mine-avganger";
 
+  // Testing: ?nday=3 shows the departures and clock three days from now, using planned times.
+  const DAY_OFFSET = (() => {
+    const days = Math.trunc(Number(new URLSearchParams(location.search).get("nday")));
+    return Number.isFinite(days) ? Math.min(Math.max(days, 0), 365) : 0;
+  })();
+  const now = () => Date.now() + DAY_OFFSET * 86400000;
+  // Entur's startTime; left out (null) when live, so Entur uses its own "now".
+  const startTime = () => DAY_OFFSET ? new Date(now()).toISOString() : null;
+
   const MODES = {
     rail: { name: "Tog", color: "#00824a" },
     metro: { name: "T-bane", color: "#d9640a" },
@@ -335,10 +349,10 @@
     ferryStop: "water", harbourPort: "water", ferryPort: "water", airport: "air",
   };
 
-  const QUERY = `query ($id: String!, $n: Int!) {
+  const QUERY = `query ($id: String!, $n: Int!, $start: DateTime) {
     stopPlace(id: $id) {
       name
-      estimatedCalls(numberOfDepartures: $n, timeRange: 43200) {
+      estimatedCalls(startTime: $start, numberOfDepartures: $n, timeRange: 43200) {
         aimedDepartureTime
         expectedDepartureTime
         realtime
@@ -365,9 +379,9 @@
   }`;
   // Calls on a leg's lines at one stop: departures where you get on, arrivals where you get off.
   // A departure is matched to its arrival by serviceJourney id and service date.
-  const LEG_QUERY = `query ($id: String!, $lines: [ID!], $ad: ArrivalDeparture!, $n: Int!) {
+  const LEG_QUERY = `query ($id: String!, $lines: [ID!], $ad: ArrivalDeparture!, $n: Int!, $start: DateTime) {
     stopPlace(id: $id) {
-      estimatedCalls(numberOfDepartures: $n, timeRange: 43200, arrivalDeparture: $ad, whiteListed: { lines: $lines }) {
+      estimatedCalls(startTime: $start, numberOfDepartures: $n, timeRange: 43200, arrivalDeparture: $ad, whiteListed: { lines: $lines }) {
         date
         aimedDepartureTime
         expectedDepartureTime
@@ -459,7 +473,7 @@
       const response = await fetch(JOURNEY_PLANNER, {
         method: "POST",
         headers: { "Content-Type": "application/json", "ET-Client-Name": CLIENT_NAME },
-        body: JSON.stringify({ query: QUERY, variables: { id, n: 200 } }),
+        body: JSON.stringify({ query: QUERY, variables: { id, n: 200, start: startTime() } }),
       });
       const json = await response.json();
       const stop = json.data?.stopPlace;
@@ -551,7 +565,7 @@
     const entry = legCalls.get(key) || { calls: [], updated: null, error: "" };
     legCalls.set(key, entry);
     try {
-      const { stopPlace } = await gql(LEG_QUERY, { id: stopId, lines: ids, ad, n: 200 });
+      const { stopPlace } = await gql(LEG_QUERY, { id: stopId, lines: ids, ad, n: 200, start: startTime() });
       if (!stopPlace) throw new Error("fant ikke stoppestedet");
       entry.calls = stopPlace.estimatedCalls || [];
       entry.updated = new Date();
@@ -600,7 +614,7 @@
   // Chains every first-leg departure with the earliest connection that can be reached on each later
   // leg. When several first departures lead to the same final trip, only the latest one is kept.
   function findTrips(route, opts) {
-    const earliest = Date.now() - 60000;
+    const earliest = now() - 60000;
     const firstWalk = (route.legs[0].walk || 0) * 60000;
     const byFinal = new Map();
     for (const first of opts[0]) {
@@ -664,7 +678,7 @@
   function rowEl(call) {
     const expected = new Date(call.expectedDepartureTime);
     const aimed = new Date(call.aimedDepartureTime);
-    const minutes = Math.round((expected - Date.now()) / 60000);
+    const minutes = Math.round((expected - now()) / 60000);
     const delayed = expected - aimed >= 60000;
 
     let time;
@@ -769,7 +783,7 @@
 
   // "Nå", "4 min" or a clock time; with a walk first, "Gå nå", "Gå om 4 min" or "Gå 12:31".
   function countdown(time, walking) {
-    const minutes = Math.round((time - Date.now()) / 60000);
+    const minutes = Math.round((time - now()) / 60000);
     const label = minutes <= 0 ? "Nå" : minutes < 10 ? (walking ? "om " : "") + minutes + " min" : clock(time);
     return { now: minutes <= 0, label: walking ? "Gå " + (minutes <= 0 ? "nå" : label) : label };
   }
@@ -903,7 +917,7 @@
     if (!entry || (!entry.updated && !entry.error)) {
       body = h("p", { class: "board-msg", text: "Henter avganger …" });
     } else {
-      const cutoff = Date.now() - 60000;
+      const cutoff = now() - 60000;
       calls = entry.calls.filter(c => new Date(c.expectedDepartureTime) >= cutoff && passes(c, board)).slice(0, board.rows);
       body = calls.length
         ? h("ol", { class: "rows" }, ...calls.map(rowEl))
@@ -961,10 +975,10 @@
   });
 
   function tick() {
-    const now = new Date();
-    $(".clock .hm").textContent = clock(now);
-    $(".clock .sec").textContent = ":" + String(now.getSeconds()).padStart(2, "0");
-    const date = now.toLocaleDateString("nb-NO", { weekday: "long", day: "numeric", month: "long" });
+    const time = new Date(now());
+    $(".clock .hm").textContent = clock(time);
+    $(".clock .sec").textContent = ":" + String(time.getSeconds()).padStart(2, "0");
+    const date = time.toLocaleDateString("nb-NO", { weekday: "long", day: "numeric", month: "long" });
     $(".date").textContent = date.charAt(0).toUpperCase() + date.slice(1);
   }
 
@@ -1380,6 +1394,12 @@
   }
 
   // ---------- start ----------
+  if (DAY_OFFSET) {
+    const banner = $(".test-mode");
+    banner.textContent = "Testmodus: " + DAY_OFFSET + (DAY_OFFSET === 1 ? " dag" : " dager")
+      + " frem i tid, med rutetider. Fjern ?nday fra adressen for sanntid.";
+    banner.hidden = false;
+  }
   tick();
   setInterval(tick, 1000);
   renderBoards();
