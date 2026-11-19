@@ -68,6 +68,17 @@ These constants are at the top of the script in the HTML file:
 
 Add `?nday=<days>` to the address to see the dashboard as it will look that many days from now, for example `index.html?nday=3` or `https://sandernf.github.io/mine-avganger/?nday=7`. The clock, date, countdowns and all departures move ahead by that many whole days (0 to 365), and a yellow label in the header shows that test mode is on. Departures that far ahead have planned times only, not real-time data. Remove the parameter to go back to live departures.
 
+## Link preview image
+
+When the dashboard's address is shared on Discord, Slack or social media, the preview shows `IMGs/og-image.png`: a departure board with one placeholder row per transport type next to the clock tower photo. It is drawn by a script, so it can be made again the same way:
+
+```sh
+pip install Pillow
+python3 tools/og-image/make_og_image.py
+```
+
+The lines, destinations, times and title are at the top of `tools/og-image/make_og_image.py`. The script uses the page's font, Barlow Semi Condensed, which is included in `tools/og-image/fonts` under the SIL Open Font License. The preview tags in `index.html` point to `https://sandernf.github.io/mine-avganger/`, so change them if you host the page elsewhere. Discord caches previews, so a changed image can take a while to show up.
+
 ## Data source
 
 - Departures: [Entur Journey Planner v3](https://developer.entur.no/docs/open-services/journey-planner) (GraphQL).
