@@ -352,17 +352,31 @@
     }
   }`;
 
-  // For travel chains: when the trips on the given lines reach the stop where you get off.
+  // Travel chains work on places: the chosen stop plus other stops within NEARBY_M metres, so that
+  // "Oslo S" also covers the trams at Jernbanetorget. Lines come from Entur's route data.
+  const NEARBY_M = 250;
+  const PLACE_QUERY = `query ($id: String!) {
+    stopPlace(id: $id) { id name latitude longitude quays { lines { id publicCode } } }
+  }`;
+  const NEARBY_QUERY = `query ($lat: Float!, $lon: Float!, $d: Float!) {
+    nearest(latitude: $lat, longitude: $lon, maximumDistance: $d, filterByPlaceTypes: [stopPlace], multiModalMode: parent, first: 20) {
+      edges { node { place { ... on StopPlace { id name quays { lines { id publicCode } } } } } }
+    }
+  }`;
+  // Calls on a leg's lines at one stop: departures where you get on, arrivals where you get off.
   // A departure is matched to its arrival by serviceJourney id and service date.
-  const ARRIVAL_QUERY = `query ($id: String!, $lines: [ID!], $n: Int!) {
+  const LEG_QUERY = `query ($id: String!, $lines: [ID!], $ad: ArrivalDeparture!, $n: Int!) {
     stopPlace(id: $id) {
-      estimatedCalls(numberOfDepartures: $n, timeRange: 43200, arrivalDeparture: both, whiteListed: { lines: $lines }) {
+      estimatedCalls(numberOfDepartures: $n, timeRange: 43200, arrivalDeparture: $ad, whiteListed: { lines: $lines }) {
         date
+        aimedDepartureTime
+        expectedDepartureTime
         aimedArrivalTime
         expectedArrivalTime
-        expectedDepartureTime
         cancellation
-        serviceJourney { id }
+        quay { publicCode }
+        serviceJourney { id line { id publicCode transportMode } }
+        situations { summary { value language } }
       }
     }
   }`;
@@ -389,7 +403,6 @@
   const platformOf = call => call.quay?.publicCode || "";
   const destOf = call => (call.destinationDisplay?.frontText || "").trim();
   const tripKey = call => (call.serviceJourney?.id || "") + "|" + (call.date || "");
-  const arrKey = (toId, lineIds) => toId + "|" + lineIds.join(",");
 
   function passes(call, f, skip) {
     if (skip !== "modes" && f.modes.length && !f.modes.includes(modeOf(call))) return false;
@@ -461,62 +474,125 @@
     return entry;
   }
 
-  const arrivals = new Map(); // arrKey -> { byTrip: Map(tripKey -> calls), updated, error }
+  async function gql(query, variables) {
+    const response = await fetch(JOURNEY_PLANNER, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "ET-Client-Name": CLIENT_NAME },
+      body: JSON.stringify({ query, variables }),
+    });
+    const json = await response.json();
+    if (!json.data) throw new Error(json.errors?.[0]?.message || "ugyldig svar");
+    return json.data;
+  }
 
-  async function fetchArrivals(toId, lineIds) {
-    const key = arrKey(toId, lineIds);
-    const entry = arrivals.get(key) || { byTrip: new Map(), updated: null, error: "" };
-    arrivals.set(key, entry);
-    try {
-      const response = await fetch(JOURNEY_PLANNER, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "ET-Client-Name": CLIENT_NAME },
-        body: JSON.stringify({ query: ARRIVAL_QUERY, variables: { id: toId, lines: lineIds, n: 200 } }),
-      });
-      const json = await response.json();
-      const stop = json.data?.stopPlace;
-      if (!stop) throw new Error(json.errors?.[0]?.message || "fant ikke stoppestedet");
-      const byTrip = new Map();
-      for (const call of stop.estimatedCalls || []) {
-        const k = tripKey(call);
-        if (!byTrip.has(k)) byTrip.set(k, []);
-        byTrip.get(k).push(call);
+  const places = new Map(); // stopId -> { members: [{ id, name, lines: Map(lineId -> code) }] } or { error }
+  const placeLoads = new Map(); // stopId -> promise, so each place is looked up once
+  const memberOf = stop => ({ id: stop.id, name: stop.name,
+    lines: new Map((stop.quays || []).flatMap(q => q.lines || []).map(l => [l.id, (l.publicCode || "").toUpperCase()])) });
+
+  function loadPlace(id) {
+    if (!placeLoads.has(id)) {
+      placeLoads.set(id, (async () => {
+        try {
+          const { stopPlace } = await gql(PLACE_QUERY, { id });
+          if (!stopPlace) throw new Error("fant ikke stoppestedet");
+          const { nearest } = await gql(NEARBY_QUERY, { lat: stopPlace.latitude, lon: stopPlace.longitude, d: NEARBY_M });
+          const members = [memberOf(stopPlace)];
+          for (const edge of nearest?.edges || []) {
+            const stop = edge.node?.place;
+            if (stop?.id && stop.quays && !members.some(m => m.id === stop.id)) members.push(memberOf(stop));
+          }
+          places.set(id, { members });
+        } catch (error) {
+          placeLoads.delete(id); // try again on the next refresh
+          places.set(id, { error: "Fikk ikke hentet stoppestedet (" + error.message + "). Prøver igjen om litt." });
+        }
+      })());
+    }
+    return placeLoads.get(id);
+  }
+
+  // Lines (id -> code) that serve both ends of a leg, whatever the time of day. Unless `all` is set,
+  // only the leg's chosen lines. Null until both places are loaded.
+  function legLines(leg, all = false) {
+    const from = places.get(leg.fromId)?.members;
+    const to = places.get(leg.toId)?.members;
+    if (!from || !to) return null;
+    const toLines = new Set(to.flatMap(m => [...m.lines.keys()]));
+    const lines = new Map();
+    for (const member of from) {
+      for (const [id, code] of member.lines) {
+        if (toLines.has(id) && (all || !leg.lines.length || leg.lines.includes(code))) lines.set(id, code);
       }
-      entry.byTrip = byTrip;
+    }
+    return lines;
+  }
+
+  const legCalls = new Map(); // request key -> { calls, updated, error }
+
+  // What a leg needs: departures at each stop of its start served by its lines, and arrivals at each
+  // such stop of its end. Null until both places are loaded.
+  function legRequests(leg) {
+    const lines = legLines(leg);
+    if (!lines) return null;
+    const ids = [...lines.keys()].sort();
+    const requests = [];
+    for (const [ad, placeId] of [["departures", leg.fromId], ["both", leg.toId]]) {
+      for (const member of places.get(placeId).members) {
+        const served = ids.filter(id => member.lines.has(id));
+        if (served.length) requests.push({ ad, stopId: member.id, name: member.name, ids: served,
+          key: ad + "|" + member.id + "|" + served.join(",") });
+      }
+    }
+    return requests;
+  }
+
+  async function fetchLegCalls({ ad, stopId, ids, key }) {
+    const entry = legCalls.get(key) || { calls: [], updated: null, error: "" };
+    legCalls.set(key, entry);
+    try {
+      const { stopPlace } = await gql(LEG_QUERY, { id: stopId, lines: ids, ad, n: 200 });
+      if (!stopPlace) throw new Error("fant ikke stoppestedet");
+      entry.calls = stopPlace.estimatedCalls || [];
       entry.updated = new Date();
       entry.error = "";
     } catch (error) {
       entry.error = "Fikk ikke hentet avganger (" + error.message + "). Prøver igjen om litt.";
     }
-    return entry;
   }
 
-  // Entur ids of the lines a leg can use from its boarding stop. `all` ignores the leg's line filter.
-  function legLineIds(leg, all = false) {
-    const calls = stops.get(leg.fromId)?.calls || [];
-    return [...new Set(calls
-      .filter(c => all || !leg.lines.length || leg.lines.includes(lineCode(c)))
-      .map(c => c.serviceJourney?.line?.id).filter(Boolean))].sort();
-  }
+  // Departures on a leg that reach its end, as { call, dep, arr, fromName, toName }, sorted by
+  // departure. Returns { opts } once loaded, otherwise { error } (empty while still loading).
+  function legOptions(leg) {
+    const placeError = [places.get(leg.fromId), places.get(leg.toId)].find(p => p?.error)?.error;
+    if (placeError) return { error: placeError };
+    const requests = legRequests(leg);
+    if (!requests) return { error: "" };
+    const loaded = requests.map(r => ({ ...r, entry: legCalls.get(r.key) }));
+    const missing = loaded.find(r => !r.entry?.updated);
+    if (missing) return { error: missing.entry?.error || "" };
 
-  // Departures on a leg that reach its destination, as { call, dep, arr }, sorted by departure.
-  // Returns { opts } once loaded, otherwise { error } (empty while still loading).
-  function legOptions(leg, all = false) {
-    const dep = stops.get(leg.fromId);
-    if (!dep?.updated) return { error: dep?.error || "" };
-    const ids = legLineIds(leg, all);
-    if (!ids.length) return { opts: [] };
-    const arr = arrivals.get(arrKey(leg.toId, ids));
-    if (!arr?.updated) return { error: arr?.error || "" };
+    const ends = new Map(); // tripKey -> [{ call, name }] where you can get off
+    for (const r of loaded.filter(r => r.ad === "both")) {
+      for (const call of r.entry.calls) {
+        if (!ends.has(tripKey(call))) ends.set(tripKey(call), []);
+        ends.get(tripKey(call)).push({ call, name: r.name });
+      }
+    }
+    const seen = new Set();
     const opts = [];
-    for (const call of dep.calls) {
-      if (call.cancellation) continue;
-      if (!all && leg.lines.length && !leg.lines.includes(lineCode(call))) continue;
-      const depTime = new Date(call.expectedDepartureTime);
-      const stopCall = (arr.byTrip.get(tripKey(call)) || []).find(a =>
-        !a.cancellation && new Date(a.expectedArrivalTime || a.expectedDepartureTime) > depTime);
-      if (!stopCall) continue;
-      opts.push({ call, dep: depTime, arr: new Date(stopCall.expectedArrivalTime || stopCall.expectedDepartureTime) });
+    for (const r of loaded.filter(r => r.ad === "departures")) {
+      for (const call of r.entry.calls) {
+        if (call.cancellation || seen.has(tripKey(call))) continue;
+        const dep = new Date(call.expectedDepartureTime);
+        const end = (ends.get(tripKey(call)) || [])
+          .map(e => ({ ...e, arr: new Date(e.call.expectedArrivalTime || e.call.expectedDepartureTime) }))
+          .filter(e => !e.call.cancellation && e.arr > dep)
+          .sort((a, b) => a.arr - b.arr)[0];
+        if (!end) continue;
+        seen.add(tripKey(call));
+        opts.push({ call, dep, arr: end.arr, fromName: r.name, toName: end.name });
+      }
     }
     return { opts: opts.sort((a, b) => a.dep - b.dep) };
   }
@@ -541,22 +617,17 @@
     return [...byFinal.values()].sort((a, b) => a[0].dep - b[0].dep);
   }
 
-  async function refreshAll() {
-    const ids = new Set();
-    for (const b of config.boards) {
-      if (b.kind === "chain") allLegs(b).forEach(l => l.fromId && ids.add(l.fromId));
-      else if (b.stopId) ids.add(b.stopId);
-    }
-    await Promise.all([...ids].map(fetchStop));
+  async function refreshChains() {
+    const legs = config.boards.filter(b => b.kind === "chain").flatMap(allLegs);
+    await Promise.all([...new Set(legs.flatMap(l => [l.fromId, l.toId]).filter(Boolean))].map(loadPlace));
     const requests = new Map();
-    for (const b of config.boards) {
-      if (b.kind !== "chain") continue;
-      for (const leg of allLegs(b)) {
-        const lineIds = legLineIds(leg);
-        if (leg.toId && lineIds.length) requests.set(arrKey(leg.toId, lineIds), [leg.toId, lineIds]);
-      }
-    }
-    await Promise.all([...requests.values()].map(([toId, lineIds]) => fetchArrivals(toId, lineIds)));
+    legs.forEach(leg => (legRequests(leg) || []).forEach(r => requests.set(r.key, r)));
+    await Promise.all([...requests.values()].map(fetchLegCalls));
+  }
+
+  async function refreshAll() {
+    const ids = [...new Set(config.boards.filter(b => b.kind !== "chain").map(b => b.stopId).filter(Boolean))];
+    await Promise.all([...ids.map(fetchStop), refreshChains()]);
     renderBoards();
   }
 
@@ -708,7 +779,7 @@
     const aimed = new Date(call.aimedDepartureTime);
     const late = Math.round((option.dep - aimed) / 60000);
     const message = messageOf(call);
-    const from = stops.get(leg.fromId)?.name || leg.fromName;
+    const from = option.fromName || leg.fromName;
     return h("li", { class: "leg-step" },
       badgeEl(call),
       h("span", {},
@@ -716,7 +787,7 @@
         late >= 1 ? h("span", { class: "late", title: "Rutetid " + clock(aimed), text: " +" + late }) : null,
         " " + from + " → ",
         h("b", { text: clock(option.arr) }),
-        " " + leg.toName,
+        " " + (option.toName || leg.toName),
         message ? h("span", { class: "note", text: message }) : null),
       h("span", { class: "plat", text: platformOf(call) ? "Spor " + platformOf(call) : "" }));
   }
@@ -807,13 +878,13 @@
           ? "Fikk ikke hentet avganger akkurat nå. Prøver igjen om litt."
           : pending ? "Henter avganger …" : "Ingen reiser der overgangene rekker å gå opp de neste timene." });
 
-    // A leg with no matching departures never asks for arrivals, so it has no arrival entry to wait for.
-    const entries = allLegs(chain).flatMap(leg => {
-      const ids = legLineIds(leg);
-      return ids.length ? [stops.get(leg.fromId), arrivals.get(arrKey(leg.toId, ids))] : [stops.get(leg.fromId)];
-    });
-    const error = entries.find(e => e?.error)?.error;
-    const oldest = entries.every(e => e?.updated) ? new Date(Math.min(...entries.map(e => e.updated))) : null;
+    // The calls behind every leg, for the "updated at" line.
+    const legs = allLegs(chain);
+    const entries = legs.flatMap(leg => (legRequests(leg) || []).map(r => legCalls.get(r.key)));
+    const error = legs.flatMap(l => [places.get(l.fromId), places.get(l.toId)]).find(p => p?.error)?.error
+      || entries.find(e => e?.error)?.error;
+    const oldest = !pending && entries.length && entries.every(e => e?.updated)
+      ? new Date(Math.min(...entries.map(e => e.updated))) : null;
     const idleNote = routes.length > 1 && idle.length
       ? " Ingen reiser de neste timene med " + idle.map(r => r.legs.map(l => l.lines.join("/") || "alle linjer").join(" → ")).join(" eller ") + "."
       : "";
@@ -1214,28 +1285,31 @@
     if (leg[end + "Id"] === place.id) return;
     leg[end + "Id"] = place.id;
     leg[end + "Name"] = place.name;
-    if (end === "from") leg.lines = [];
     renderLegChips(leg);
     updateChainSave();
     loadLegOptions(leg);
   }
 
-  // Line chips list only the lines that run directly from the leg's start to its end.
+  // Line chips list every line that serves both ends of the leg, from Entur's route data, so lines
+  // that only run at other times of day are there too. Chosen lines that no longer fit are dropped.
   function renderLegChips(leg) {
     const box = chainRoutesEl.querySelector(`[data-leg="${leg.id}"] .leg-lines`);
     if (!box) return;
-    const codes = new Set(leg.lines);
+    let codes = new Set(leg.lines);
     let hint;
     if (!legComplete(leg)) {
       hint = "Velg fra og til, så ser du hvilke linjer som går direkte mellom dem.";
     } else {
-      const { opts, error } = legOptions(leg, true);
-      if (!opts) hint = error ? "Fikk ikke hentet linjer akkurat nå." : "Henter linjer …";
+      const failed = [places.get(leg.fromId), places.get(leg.toId)].some(p => p?.error);
+      const lines = legLines(leg, true);
+      if (failed) hint = "Fikk ikke hentet linjer akkurat nå.";
+      else if (!lines) hint = "Henter linjer …";
       else {
-        opts.forEach(o => codes.add(lineCode(o.call)));
-        hint = opts.length
-          ? "Trykk for å velge. Velger du ingen, brukes alle linjene som går hit."
-          : "Fant ingen direkte avganger mellom disse de neste 12 timene. Store knutepunkt er delt i flere stopp i Entur, for eksempel Oslo S for tog og Jernbanetorget for T-bane, trikk og buss.";
+        codes = new Set(lines.values());
+        leg.lines = leg.lines.filter(code => codes.has(code));
+        hint = codes.size
+          ? "Trykk for å velge. Velger du ingen, brukes alle linjene som går hit. Stopp innen " + NEARBY_M + " meter regnes med, for eksempel Jernbanetorget ved Oslo S."
+          : "Fant ingen linjer som går direkte mellom disse stoppestedene.";
       }
     }
     box.querySelector(".chips").replaceChildren(...[...codes].sort(byNatural).map(code => {
@@ -1247,16 +1321,7 @@
   }
 
   async function loadLegOptions(leg) {
-    if (!leg.fromId) return;
-    if (!stops.get(leg.fromId)?.updated) {
-      await fetchStop(leg.fromId);
-      if (!chainDialog.open) return;
-      renderLegChips(leg);
-    }
-    if (!leg.toId) return;
-    const ids = legLineIds(leg, true);
-    if (!ids.length || arrivals.get(arrKey(leg.toId, ids))?.updated) return;
-    await fetchArrivals(leg.toId, ids);
+    await Promise.all([leg.fromId, leg.toId].filter(Boolean).map(loadPlace));
     if (chainDialog.open) renderLegChips(leg);
   }
 

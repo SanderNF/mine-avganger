@@ -35,7 +35,7 @@ The page will not load departures inside a sandboxed preview (such as the file p
 ### Travel chains
 
 1. In edit mode, click **Legg til reise**.
-2. For each leg, choose where you get on (**Fra**) and where you get off (**Til**). The line chips then show only the lines that run directly between the two stops. Pick the ones you use, or leave them all off to allow any of them.
+2. For each leg, choose where you get on (**Fra**) and where you get off (**Til**). The line chips then show every line that runs directly between the two, including lines that only run at other times of day. Pick the ones you use, or leave them all off to allow any of them. Stops within 250 metres count as the same place, so **Oslo S** also covers the trams and buses at Jernbanetorget, and each leg on the board shows the stop actually used.
 3. Set the walking time: for the first leg, the time it takes to walk to the first stop; for later legs, the time you need to walk and change from the previous one.
 4. Click **+ Legg til etappe** for each change.
 5. Optionally set the walk from the last stop to where you are going. Routes that end at different stops are then compared by when you actually get there.
@@ -73,9 +73,10 @@ Entur's data is open and licensed under the Norwegian Licence for Open Governmen
 
 ## Known limitations
 
-- Large hubs are separate stops in Entur. For example, Oslo S has the trains and Jernbanetorget has the metro, trams and buses, so add a board for each.
+- Large hubs are separate stops in Entur, and departure boards (unlike travel chains) show one stop each. For example, Oslo S has the trains and Jernbanetorget has the metro, trams and buses, so add a board for each.
 - The destination filter matches the destination shown on the departure, which is where the trip ends. A train to Dombås does not count as "Lillehammer" even though it stops there.
-- Travel chains only use direct trips within each leg, and use the walking times you set rather than Entur's own change times. Connections are worked out from departures in the next 12 hours, up to 200 per stop.
+- Travel chains only use direct trips within each leg, and use the walking times you set rather than Entur's own change times. Connections are worked out from departures on the chosen lines in the next 12 hours, up to 200 per stop.
+- The 250 metre rule is measured from the stop you choose, so it is not always symmetric: Oslo S includes Jernbanetorget (236 m), but Jernbanetorget does not include Oslo S, since the stations' centre points are 343 m apart.
 - Each board shows departures from the next 12 hours, up to 200 per stop before filtering, so very selective filters at busy stops may show few results.
 - Stop search uses Entur's Geocoder v1, which Entur deprecated on 12 June 2026 in favour of Geocoder v3. If stop search stops working, it needs to be moved to v3.
 
