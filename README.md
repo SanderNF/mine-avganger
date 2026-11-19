@@ -9,7 +9,7 @@ It is a single HTML file with no build step, no server and no API key. Departure
 
 - Several departure boards on one page, each for any stop in Norway.
 - Filters per board by transport type, line, platform, and destination for each line (for example RE10 towards Dombås but not towards Lillehammer).
-- Travel chains: save a trip with several legs and changes, for example tram 12 or 15 from Glads vei to Jernbanetorget, a 5 minute walk, then RE10 from Oslo S to Lillestrøm. The board shows the next trips where every connection can be made, with real-time times for each leg.
+- Travel chains: save a trip with several legs and changes, for example tram 12 or 15 from Glads vei to Jernbanetorget, a 5 minute walk, then RE10 from Oslo S to Lillestrøm. The board shows the next trips where every connection can be made, with real-time times for each leg. A travel board can hold alternative routes, for example metro 5 from Storo to Økern and a 7 minute walk, or bus 23/24 from Storo to Ulven torg and a 5 minute walk, sorted together by arrival or departure.
 - Real-time times that count down in minutes close to departure, with delays, cancellations and disruption messages.
 - Edit mode for adding, renaming, removing, resizing and reordering boards, by dragging or with arrow buttons.
 - Light and dark themes that follow your system setting.
@@ -37,9 +37,12 @@ The page will not load departures inside a sandboxed preview (such as the file p
 1. In edit mode, click **Legg til reise**.
 2. For each leg, choose where you get on (**Fra**) and where you get off (**Til**). The line chips then show only the lines that run directly between the two stops. Pick the ones you use, or leave them all off to allow any of them.
 3. Set the walking time: for the first leg, the time it takes to walk to the first stop; for later legs, the time you need to walk and change from the previous one.
-4. Click **+ Legg til etappe** for each change, then **Legg til reise**.
+4. Click **+ Legg til etappe** for each change.
+5. Optionally set the walk from the last stop to where you are going. Routes that end at different stops are then compared by when you actually get there.
+6. To add another way to make the same trip, click **+ Legg til alternativ rute** and set it up the same way. With more than one route, **Sorter reisene etter** decides the order: **Ankomst** (the default) puts the trip that gets you there first at the top, **Avgang** the one that leaves first.
+7. Click **Legg til reise**.
 
-Each row on the board is one trip: when to leave, when you arrive, and every leg with times, track and any waiting time. When several early departures lead to the same final connection, only the latest one is shown, so you never leave earlier than you need to.
+Each row on the board is one trip: when to leave, when you arrive, and every leg with times, track and any waiting time. When several early departures lead to the same final connection, only the latest one is shown, so you never leave earlier than you need to. If one of several routes has no trips, for example while a metro line is replaced by buses, the note under the board says so.
 
 Your setup is saved in the browser's local storage. It stays when you close the page, but it does not follow you to another browser or device.
 

@@ -204,10 +204,13 @@
   .walk-step { padding-left: calc(3.4em + 12px); font-size: 0.9rem; color: var(--muted); }
   .leg-edit { border: 1px solid var(--rule-input); border-radius: 8px; padding: 14px 14px 0; margin: 0 0 14px; }
   .leg-edit-head { display: flex; justify-content: space-between; align-items: center; margin: 0 0 12px; }
-  .leg-edit h3 { margin: 0; font-size: 1.15rem; }
+  .leg-edit h4 { margin: 0; font-size: 1.15rem; }
   .btn.small { padding: 3px 10px; font-size: 0.95rem; }
   .field input.walk-input { width: 7em; }
-  .add-leg { margin: 0 0 20px; }
+  .add-leg, .add-route { margin: 0 0 20px; }
+  .route-edit + .route-edit { border-top: 1px solid var(--rule); padding-top: 18px; }
+  .route-head { display: flex; justify-content: space-between; align-items: center; margin: 0 0 12px; }
+  .route-head h3 { margin: 0; font-size: 1.3rem; }
 </style>
 </head>
 <body>
@@ -274,8 +277,16 @@
         <input id="chain-title" type="text" placeholder="For eksempel «Til jobb»">
       </div>
 
-      <div class="legs-edit"></div>
-      <button type="button" class="btn add-leg">+ Legg til etappe</button>
+      <div class="routes-edit"></div>
+      <button type="button" class="btn add-route">+ Legg til alternativ rute</button>
+
+      <div class="field" data-sort hidden>
+        <label for="chain-sort">Sorter reisene etter</label>
+        <select id="chain-sort">
+          <option value="arrival">Ankomst, først fremme øverst</option>
+          <option value="departure">Avgang, går først øverst</option>
+        </select>
+      </div>
 
       <div class="field-row">
         <div class="field">
@@ -398,10 +409,19 @@
   function newLeg(overrides = {}) {
     return { id: uid(), fromId: "", fromName: "", toId: "", toName: "", walk: 0, ...overrides, lines: [...(overrides.lines || [])] };
   }
-  function newChain(overrides = {}) {
+  // A route is one way to make the trip; `walkEnd` is the walk from its last stop to the destination.
+  function newRoute(overrides = {}) {
     const legs = (overrides.legs?.length ? overrides.legs : [{}]).map(newLeg);
-    return { id: uid(), kind: "chain", title: "", rows: 5, wide: false, ...overrides, legs };
+    return { id: uid(), walkEnd: 0, ...overrides, legs };
   }
+  // A travel board holds one or more alternative routes, sorted together by arrival or departure.
+  // Older saves kept a single route's legs directly on the chain.
+  function newChain(overrides = {}) {
+    const { legs, ...rest } = overrides;
+    const routes = (rest.routes?.length ? rest.routes : [{ legs }]).map(newRoute);
+    return { id: uid(), kind: "chain", title: "", rows: 5, wide: false, sort: "arrival", ...rest, routes };
+  }
+  const allLegs = chain => chain.routes.flatMap(r => r.legs);
   const restoreItem = item => item?.kind === "chain" ? newChain(item) : newBoard(item);
 
   function loadConfig() {
@@ -503,15 +523,15 @@
 
   // Chains every first-leg departure with the earliest connection that can be reached on each later
   // leg. When several first departures lead to the same final trip, only the latest one is kept.
-  function findTrips(chain, opts) {
+  function findTrips(route, opts) {
     const earliest = Date.now() - 60000;
-    const firstWalk = (chain.legs[0].walk || 0) * 60000;
+    const firstWalk = (route.legs[0].walk || 0) * 60000;
     const byFinal = new Map();
     for (const first of opts[0]) {
       if (first.dep - firstWalk < earliest) continue;
       const path = [first];
       for (let i = 1; i < opts.length; i++) {
-        const ready = path[i - 1].arr.getTime() + (chain.legs[i].walk || 0) * 60000;
+        const ready = path[i - 1].arr.getTime() + (route.legs[i].walk || 0) * 60000;
         const next = opts[i].find(o => o.dep >= ready);
         if (!next) break;
         path.push(next);
@@ -524,14 +544,14 @@
   async function refreshAll() {
     const ids = new Set();
     for (const b of config.boards) {
-      if (b.kind === "chain") b.legs.forEach(l => l.fromId && ids.add(l.fromId));
+      if (b.kind === "chain") allLegs(b).forEach(l => l.fromId && ids.add(l.fromId));
       else if (b.stopId) ids.add(b.stopId);
     }
     await Promise.all([...ids].map(fetchStop));
     const requests = new Map();
     for (const b of config.boards) {
       if (b.kind !== "chain") continue;
-      for (const leg of b.legs) {
+      for (const leg of allLegs(b)) {
         const lineIds = legLineIds(leg);
         if (leg.toId && lineIds.length) requests.set(arrKey(leg.toId, lineIds), [leg.toId, lineIds]);
       }
@@ -701,65 +721,103 @@
       h("span", { class: "plat", text: platformOf(call) ? "Spor " + platformOf(call) : "" }));
   }
 
-  function tripEl(chain, path) {
-    const start = path[0];
-    const end = path.at(-1);
-    const firstWalk = chain.legs[0].walk || 0;
-    const leave = new Date(start.dep.getTime() - firstWalk * 60000);
+  // One trip on one route: when to leave home and when you reach the destination, walks included.
+  function makeTrip(route, path) {
+    const leave = new Date(path[0].dep.getTime() - (route.legs[0].walk || 0) * 60000);
+    const arrive = new Date(path.at(-1).arr.getTime() + (route.walkEnd || 0) * 60000);
+    return { route, path, leave, arrive };
+  }
+
+  const TRIP_ORDER = {
+    arrival: (a, b) => a.arrive - b.arrive || a.leave - b.leave,
+    departure: (a, b) => a.leave - b.leave || a.arrive - b.arrive,
+  };
+
+  function tripEl({ route, path, leave, arrive }) {
+    const firstWalk = route.legs[0].walk || 0;
     const when = countdown(leave, firstWalk > 0);
-    const total = Math.round((end.arr - leave) / 60000);
+    const total = Math.round((arrive - leave) / 60000);
     const changes = path.length - 1;
+    const walks = firstWalk || route.walkEnd || route.legs.some(l => l.walk);
 
     const steps = [];
     path.forEach((option, i) => {
       if (i > 0) {
-        const walk = chain.legs[i].walk || 0;
+        const walk = route.legs[i].walk || 0;
         const wait = Math.round((option.dep - path[i - 1].arr) / 60000) - walk;
         steps.push(h("li", { class: "walk-step",
           text: (walk ? "Gå og bytt, " + walk + " min" : "Bytte") + (wait >= 1 ? " · venter " + wait + " min" : "") }));
       }
-      steps.push(legStepEl(chain.legs[i], option));
+      steps.push(legStepEl(route.legs[i], option));
     });
+    if (route.walkEnd) {
+      steps.push(h("li", { class: "walk-step", text: "Gå " + route.walkEnd + " min til målet, fremme " + clock(arrive) }));
+    }
 
     return h("li", { class: "trip" },
       h("div", { class: "trip-head" },
         h("span", { class: "trip-span" },
-          h("b", { text: clock(start.dep) + " – " + clock(end.arr) }),
-          h("span", { class: "note", text: total + " min" + (firstWalk ? " med gange" : "")
+          h("b", { text: clock(leave) + " – " + clock(arrive) }),
+          h("span", { class: "note", text: total + " min" + (walks ? " med gange" : "")
             + (changes ? " · " + changes + (changes === 1 ? " bytte" : " bytter") : "") })),
         h("span", { class: "time" + (when.now ? " now" : "") }, h("span", { class: "t-main", text: when.label }))),
       h("ol", { class: "trip-legs" }, ...steps));
   }
 
-  function chainEl(chain, index) {
-    const legs = chain.legs;
-    const route = legs[0].fromName + " → " + legs.at(-1).toName;
-    const name = chain.title || route;
+  function routeSummary(route) {
     const parts = [];
-    legs.forEach((leg, i) => {
+    route.legs.forEach((leg, i) => {
       if (i > 0 && leg.walk) parts.push(leg.walk + " min gange");
       parts.push(leg.lines.length ? leg.lines.join("/") : "alle linjer");
     });
-    const sub = (chain.title ? route + ". " : "") + parts.join(" → ");
+    if (route.walkEnd) parts.push(route.walkEnd + " min gange");
+    return parts.join(" → ");
+  }
 
-    const data = legs.map(leg => legOptions(leg));
-    let body;
-    let trips = [];
-    if (data.some(d => !d.opts)) {
-      body = h("p", { class: "board-msg", text: data.some(d => d.error)
-        ? "Fikk ikke hentet avganger akkurat nå. Prøver igjen om litt."
-        : "Henter avganger …" });
-    } else {
-      trips = findTrips(chain, data.map(d => d.opts)).slice(0, chain.rows);
-      body = trips.length
-        ? h("ol", { class: "rows" }, ...trips.map(path => tripEl(chain, path)))
-        : h("p", { class: "board-msg", text: "Ingen reiser der overgangene rekker å gå opp de neste timene." });
+  function chainEl(chain, index) {
+    const { routes } = chain;
+    const ends = [...new Set(routes.map(r => r.legs.at(-1).toName))];
+    const way = routes[0].legs[0].fromName + " → " + ends.join(" / ");
+    const name = chain.title || way;
+    const sub = (chain.title ? way + ". " : "") + routes.map(routeSummary).join(" eller ")
+      + (routes.length > 1 ? ". Sortert etter " + (chain.sort === "departure" ? "avgang" : "ankomst") : "");
+
+    // Routes whose data is in show their trips even while another route is still loading or failing.
+    const trips = [];
+    const idle = []; // routes with data but no trips, for example while a line is replaced by buses
+    let pending = false;
+    let failed = false;
+    for (const route of routes) {
+      const data = route.legs.map(leg => legOptions(leg));
+      if (data.some(d => !d.opts)) {
+        pending = true;
+        failed ||= data.some(d => d.error);
+        continue;
+      }
+      const found = findTrips(route, data.map(d => d.opts));
+      if (!found.length) idle.push(route);
+      trips.push(...found.map(path => makeTrip(route, path)));
     }
+    trips.sort(TRIP_ORDER[chain.sort] || TRIP_ORDER.arrival);
+    const shown = trips.slice(0, chain.rows);
 
-    const entries = legs.flatMap(leg => [stops.get(leg.fromId), arrivals.get(arrKey(leg.toId, legLineIds(leg)))]);
+    const body = shown.length
+      ? h("ol", { class: "rows" }, ...shown.map(tripEl))
+      : h("p", { class: "board-msg", text: failed
+          ? "Fikk ikke hentet avganger akkurat nå. Prøver igjen om litt."
+          : pending ? "Henter avganger …" : "Ingen reiser der overgangene rekker å gå opp de neste timene." });
+
+    // A leg with no matching departures never asks for arrivals, so it has no arrival entry to wait for.
+    const entries = allLegs(chain).flatMap(leg => {
+      const ids = legLineIds(leg);
+      return ids.length ? [stops.get(leg.fromId), arrivals.get(arrKey(leg.toId, ids))] : [stops.get(leg.fromId)];
+    });
     const error = entries.find(e => e?.error)?.error;
     const oldest = entries.every(e => e?.updated) ? new Date(Math.min(...entries.map(e => e.updated))) : null;
-    const meta = error || (oldest ? "Sanntid fra Entur, oppdatert " + clock(oldest) : "");
+    const idleNote = routes.length > 1 && idle.length
+      ? " Ingen reiser de neste timene med " + idle.map(r => r.legs.map(l => l.lines.join("/") || "alle linjer").join(" → ")).join(" eller ") + "."
+      : "";
+    const meta = error || (oldest ? "Sanntid fra Entur, oppdatert " + clock(oldest) + "." + idleNote : "");
     return boardShell(chain, index, name, sub, meta, body);
   }
 
@@ -1090,15 +1148,44 @@
   const chainTitle = $("#chain-title");
   const chainRows = $("#chain-rows");
   const chainWidth = $("#chain-width");
-  const chainLegsEl = $(".legs-edit", chainDialog);
+  const chainSort = $("#chain-sort");
+  const chainRoutesEl = $(".routes-edit", chainDialog);
   const chainSave = $('[data-act="save"]', chainDialog);
   let chainDraft = null;
 
   const legComplete = leg => leg.fromId && leg.toId;
-  const updateChainSave = () => { chainSave.disabled = !chainDraft.legs.every(legComplete); };
+  const updateChainSave = () => { chainSave.disabled = !allLegs(chainDraft).every(legComplete); };
 
-  function renderChainLegs() {
-    chainLegsEl.replaceChildren(...chainDraft.legs.map((leg, i) => {
+  function renderChainRoutes() {
+    const several = chainDraft.routes.length > 1;
+    chainRoutesEl.replaceChildren(...chainDraft.routes.map((route, r) => {
+      const walkEnd = h("input", { id: "walkend-" + route.id, class: "walk-input", type: "number", min: "0", max: "120", step: "1",
+        inputmode: "numeric", value: String(route.walkEnd) });
+      walkEnd.addEventListener("input", () => { route.walkEnd = Math.max(0, Math.min(120, parseInt(walkEnd.value, 10) || 0)); });
+      return h("div", { class: "route-edit", "data-route": route.id },
+        several ? h("div", { class: "route-head" },
+          h("h3", { text: "Rute " + (r + 1) }),
+          h("button", { type: "button", class: "btn ghost small", text: "Fjern rute",
+            onclick: () => { chainDraft.routes.splice(r, 1); renderChainRoutes(); } })) : null,
+        ...routeLegEls(route),
+        h("button", { type: "button", class: "btn add-leg", text: "+ Legg til etappe", onclick: () => {
+          const leg = newLeg({ walk: 5 });
+          route.legs.push(leg);
+          renderChainRoutes();
+          $(`[data-leg="${leg.id}"] [role="combobox"]`, chainRoutesEl).focus();
+        } }),
+        h("div", { class: "field" },
+          h("label", { for: walkEnd.id }, "Gangtid fra siste stopp til målet, minutter ",
+            h("span", { class: "opt", text: "(valgfritt)" })),
+          walkEnd));
+    }));
+    $("[data-sort]", chainDialog).hidden = !several;
+    allLegs(chainDraft).forEach(renderLegChips);
+    updateChainSave();
+  }
+
+  function routeLegEls(route) {
+    return route.legs.map((leg, i) => {
       const from = createStopPicker({ label: "Fra", onChoose: place => setLegStop(leg, "from", place) });
       const to = createStopPicker({ label: "Til", onChoose: place => setLegStop(leg, "to", place) });
       from.set(leg.fromName);
@@ -1108,9 +1195,9 @@
       walk.addEventListener("input", () => { leg.walk = Math.max(0, Math.min(120, parseInt(walk.value, 10) || 0)); });
       return h("div", { class: "leg-edit", "data-leg": leg.id },
         h("div", { class: "leg-edit-head" },
-          h("h3", { text: "Etappe " + (i + 1) }),
-          chainDraft.legs.length > 1 ? h("button", { type: "button", class: "btn ghost small", text: "Fjern etappe",
-            onclick: () => { chainDraft.legs.splice(i, 1); renderChainLegs(); } }) : null),
+          h("h4", { text: "Etappe " + (i + 1) }),
+          route.legs.length > 1 ? h("button", { type: "button", class: "btn ghost small", text: "Fjern etappe",
+            onclick: () => { route.legs.splice(i, 1); renderChainRoutes(); } }) : null),
         h("div", { class: "field" },
           h("label", { for: walk.id, text: i === 0 ? "Gangtid til første stopp, minutter" : "Gange og bytte fra forrige etappe, minutter" }),
           walk),
@@ -1120,9 +1207,7 @@
           h("span", { class: "field-label", text: "Linjer" }),
           h("div", { class: "chips" }),
           h("p", { class: "hint" })));
-    }));
-    chainDraft.legs.forEach(renderLegChips);
-    updateChainSave();
+    });
   }
 
   function setLegStop(leg, end, place) {
@@ -1137,7 +1222,7 @@
 
   // Line chips list only the lines that run directly from the leg's start to its end.
   function renderLegChips(leg) {
-    const box = chainLegsEl.querySelector(`[data-leg="${leg.id}"] .leg-lines`);
+    const box = chainRoutesEl.querySelector(`[data-leg="${leg.id}"] .leg-lines`);
     if (!box) return;
     const codes = new Set(leg.lines);
     let hint;
@@ -1182,23 +1267,25 @@
     chainTitle.value = chainDraft.title;
     chainRows.value = String(chainDraft.rows);
     chainWidth.value = chainDraft.wide ? "wide" : "normal";
-    renderChainLegs();
+    chainSort.value = chainDraft.sort;
+    renderChainRoutes();
     chainDialog.showModal();
-    chainDraft.legs.forEach(loadLegOptions);
-    if (!chain) $('[role="combobox"]', chainLegsEl).focus();
+    allLegs(chainDraft).forEach(loadLegOptions);
+    if (!chain) $('[role="combobox"]', chainRoutesEl).focus();
   }
 
   setupDialog(chainDialog);
 
-  $(".add-leg", chainDialog).addEventListener("click", () => {
-    const leg = newLeg({ walk: 5 });
-    chainDraft.legs.push(leg);
-    renderChainLegs();
-    $(`[data-leg="${leg.id}"] [role="combobox"]`, chainLegsEl).focus();
+  $(".add-route", chainDialog).addEventListener("click", () => {
+    const route = newRoute();
+    chainDraft.routes.push(route);
+    renderChainRoutes();
+    $(`[data-route="${route.id}"] [role="combobox"]`, chainRoutesEl).focus();
   });
 
   chainSave.addEventListener("click", () => {
-    if (!chainDraft?.legs.every(legComplete)) return;
+    if (!chainDraft || !allLegs(chainDraft).every(legComplete)) return;
+    chainDraft.sort = chainSort.value;
     chainDraft.title = chainTitle.value.trim();
     chainDraft.rows = Number(chainRows.value);
     chainDraft.wide = chainWidth.value === "wide";
