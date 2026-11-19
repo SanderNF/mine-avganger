@@ -65,9 +65,21 @@
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   /* Header */
+  /* Full-width dark band with the Oslo S clock tower fading in from the right. Header text is
+     always light on it, whatever the theme. */
   .top {
+    --ink: #ffffff; --muted: rgba(255, 255, 255, 0.72); --accent: #7aa2ff; --accent-ink: #0a1424;
+    color: var(--ink);
     display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px;
-    max-width: 1440px; margin: 0 auto; padding: 28px clamp(16px, 4vw, 40px) 18px;
+    margin: 0 0 20px;
+    padding: 34px max(clamp(16px, 4vw, 40px), calc((100% - 1440px) / 2 + 40px)) 26px;
+    background:
+      linear-gradient(90deg, #05070b 0%, #05070b 30%, rgba(5, 7, 11, 0.55) 62%, rgba(5, 7, 11, 0.1) 100%),
+      url("IMGs/clock-tower.jpg") right 4% top 24% / 520px auto no-repeat,
+      #05070b;
+  }
+  @media (max-width: 640px) {
+    .top { background-size: auto, 380px auto, auto; background-position: 0 0, right -60px top 22%, 0 0; }
   }
   .title { margin: 0; font-size: clamp(1.7rem, 3.2vw, 2.4rem); font-weight: 700; line-height: 1.05; letter-spacing: -0.01em; }
   body.editing .title { outline: 2px dashed var(--accent); outline-offset: 5px; border-radius: 2px; cursor: text; }
@@ -179,6 +191,23 @@
   .ld-code { font-weight: 700; }
   .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .editor-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--rule); }
+
+  /* Travel chains */
+  .trip { padding: 12px 18px; border-bottom: 1px solid var(--rule); }
+  .trip:last-child { border-bottom: 0; }
+  .trip-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 1.15rem; }
+  .trip-span b { font-weight: 700; }
+  .trip-legs { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+  .leg-step { display: grid; grid-template-columns: 3.4em minmax(0, 1fr) auto; gap: 12px; align-items: baseline; }
+  .leg-step .plat { color: var(--muted); font-size: 0.9rem; white-space: nowrap; }
+  .leg-step .late { color: var(--late); font-weight: 600; }
+  .walk-step { padding-left: calc(3.4em + 12px); font-size: 0.9rem; color: var(--muted); }
+  .leg-edit { border: 1px solid var(--rule-input); border-radius: 8px; padding: 14px 14px 0; margin: 0 0 14px; }
+  .leg-edit-head { display: flex; justify-content: space-between; align-items: center; margin: 0 0 12px; }
+  .leg-edit h3 { margin: 0; font-size: 1.15rem; }
+  .btn.small { padding: 3px 10px; font-size: 0.95rem; }
+  .field input.walk-input { width: 7em; }
+  .add-leg { margin: 0 0 20px; }
 </style>
 </head>
 <body>
@@ -200,15 +229,7 @@
     <div class="editor-inner">
       <h2 id="editor-heading">Ny tavle</h2>
 
-      <div class="field">
-        <label for="stop-input">Stoppested</label>
-        <div class="combo-box">
-          <input id="stop-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false"
-                 aria-controls="stop-results" autocomplete="off" spellcheck="false" placeholder="Søk etter stasjon eller holdeplass">
-          <ul id="stop-results" class="results" role="listbox" hidden></ul>
-        </div>
-        <p class="hint" id="stop-status" role="status"></p>
-      </div>
+      <div class="stop-slot"></div>
 
       <div class="field">
         <label for="title-input">Navn på tavla <span class="opt">(valgfritt)</span></label>
@@ -240,6 +261,38 @@
     <div class="editor-actions">
       <button type="button" class="btn ghost" data-act="cancel">Avbryt</button>
       <button type="button" class="btn primary" data-act="save">Lagre tavle</button>
+    </div>
+  </dialog>
+
+  <dialog class="editor chain-editor" aria-labelledby="chain-heading">
+    <div class="editor-inner">
+      <h2 id="chain-heading">Ny reise</h2>
+      <p class="hint" style="margin: -10px 0 18px;">Sett sammen etappene du pleier å ta. Tavla viser de neste reisene der overgangene rekker å gå opp, med sanntid for hver etappe.</p>
+
+      <div class="field">
+        <label for="chain-title">Navn på reisen <span class="opt">(valgfritt)</span></label>
+        <input id="chain-title" type="text" placeholder="For eksempel «Til jobb»">
+      </div>
+
+      <div class="legs-edit"></div>
+      <button type="button" class="btn add-leg">+ Legg til etappe</button>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="chain-rows">Antall reiser</label>
+          <select id="chain-rows">
+            <option value="3">3</option><option value="5">5</option><option value="8">8</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="chain-width">Bredde</label>
+          <select id="chain-width"><option value="normal">Vanlig</option><option value="wide">Bred</option></select>
+        </div>
+      </div>
+    </div>
+    <div class="editor-actions">
+      <button type="button" class="btn ghost" data-act="cancel">Avbryt</button>
+      <button type="button" class="btn primary" data-act="save">Legg til reise</button>
     </div>
   </dialog>
 
@@ -279,10 +332,26 @@
         expectedDepartureTime
         realtime
         cancellation
+        date
         destinationDisplay { frontText }
         quay { publicCode }
-        serviceJourney { line { publicCode transportMode } }
+        serviceJourney { id line { id publicCode transportMode } }
         situations { summary { value language } }
+      }
+    }
+  }`;
+
+  // For travel chains: when the trips on the given lines reach the stop where you get off.
+  // A departure is matched to its arrival by serviceJourney id and service date.
+  const ARRIVAL_QUERY = `query ($id: String!, $lines: [ID!], $n: Int!) {
+    stopPlace(id: $id) {
+      estimatedCalls(numberOfDepartures: $n, timeRange: 43200, arrivalDeparture: both, whiteListed: { lines: $lines }) {
+        date
+        aimedArrivalTime
+        expectedArrivalTime
+        expectedDepartureTime
+        cancellation
+        serviceJourney { id }
       }
     }
   }`;
@@ -308,6 +377,8 @@
   const modeOf = call => call.serviceJourney?.line?.transportMode || "";
   const platformOf = call => call.quay?.publicCode || "";
   const destOf = call => (call.destinationDisplay?.frontText || "").trim();
+  const tripKey = call => (call.serviceJourney?.id || "") + "|" + (call.date || "");
+  const arrKey = (toId, lineIds) => toId + "|" + lineIds.join(",");
 
   function passes(call, f, skip) {
     if (skip !== "modes" && f.modes.length && !f.modes.includes(modeOf(call))) return false;
@@ -322,10 +393,21 @@
     return { id: uid(), stopId: "", stopName: "", title: "", modes: [], lines: [], platforms: [], rows: 8, wide: false, ...overrides,
       lineDest: { ...(overrides.lineDest || {}) } };
   }
+  // A travel chain: legs taken one after another, each from one stop to another on chosen lines,
+  // with `walk` minutes before it (to the first stop, or to change from the previous leg).
+  function newLeg(overrides = {}) {
+    return { id: uid(), fromId: "", fromName: "", toId: "", toName: "", walk: 0, ...overrides, lines: [...(overrides.lines || [])] };
+  }
+  function newChain(overrides = {}) {
+    const legs = (overrides.legs?.length ? overrides.legs : [{}]).map(newLeg);
+    return { id: uid(), kind: "chain", title: "", rows: 5, wide: false, ...overrides, legs };
+  }
+  const restoreItem = item => item?.kind === "chain" ? newChain(item) : newBoard(item);
+
   function loadConfig() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORE_KEY));
-      if (saved && Array.isArray(saved.boards)) return { title: saved.title || "Mine avganger", boards: saved.boards.map(b => newBoard(b)) };
+      if (saved && Array.isArray(saved.boards)) return { title: saved.title || "Mine avganger", boards: saved.boards.map(restoreItem) };
     } catch {}
     return { title: "Mine avganger", boards: [newBoard({ stopId: "NSR:StopPlace:337", stopName: "Oslo S" })] };
   }
@@ -359,9 +441,102 @@
     return entry;
   }
 
+  const arrivals = new Map(); // arrKey -> { byTrip: Map(tripKey -> calls), updated, error }
+
+  async function fetchArrivals(toId, lineIds) {
+    const key = arrKey(toId, lineIds);
+    const entry = arrivals.get(key) || { byTrip: new Map(), updated: null, error: "" };
+    arrivals.set(key, entry);
+    try {
+      const response = await fetch(JOURNEY_PLANNER, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "ET-Client-Name": CLIENT_NAME },
+        body: JSON.stringify({ query: ARRIVAL_QUERY, variables: { id: toId, lines: lineIds, n: 200 } }),
+      });
+      const json = await response.json();
+      const stop = json.data?.stopPlace;
+      if (!stop) throw new Error(json.errors?.[0]?.message || "fant ikke stoppestedet");
+      const byTrip = new Map();
+      for (const call of stop.estimatedCalls || []) {
+        const k = tripKey(call);
+        if (!byTrip.has(k)) byTrip.set(k, []);
+        byTrip.get(k).push(call);
+      }
+      entry.byTrip = byTrip;
+      entry.updated = new Date();
+      entry.error = "";
+    } catch (error) {
+      entry.error = "Fikk ikke hentet avganger (" + error.message + "). Prøver igjen om litt.";
+    }
+    return entry;
+  }
+
+  // Entur ids of the lines a leg can use from its boarding stop. `all` ignores the leg's line filter.
+  function legLineIds(leg, all = false) {
+    const calls = stops.get(leg.fromId)?.calls || [];
+    return [...new Set(calls
+      .filter(c => all || !leg.lines.length || leg.lines.includes(lineCode(c)))
+      .map(c => c.serviceJourney?.line?.id).filter(Boolean))].sort();
+  }
+
+  // Departures on a leg that reach its destination, as { call, dep, arr }, sorted by departure.
+  // Returns { opts } once loaded, otherwise { error } (empty while still loading).
+  function legOptions(leg, all = false) {
+    const dep = stops.get(leg.fromId);
+    if (!dep?.updated) return { error: dep?.error || "" };
+    const ids = legLineIds(leg, all);
+    if (!ids.length) return { opts: [] };
+    const arr = arrivals.get(arrKey(leg.toId, ids));
+    if (!arr?.updated) return { error: arr?.error || "" };
+    const opts = [];
+    for (const call of dep.calls) {
+      if (call.cancellation) continue;
+      if (!all && leg.lines.length && !leg.lines.includes(lineCode(call))) continue;
+      const depTime = new Date(call.expectedDepartureTime);
+      const stopCall = (arr.byTrip.get(tripKey(call)) || []).find(a =>
+        !a.cancellation && new Date(a.expectedArrivalTime || a.expectedDepartureTime) > depTime);
+      if (!stopCall) continue;
+      opts.push({ call, dep: depTime, arr: new Date(stopCall.expectedArrivalTime || stopCall.expectedDepartureTime) });
+    }
+    return { opts: opts.sort((a, b) => a.dep - b.dep) };
+  }
+
+  // Chains every first-leg departure with the earliest connection that can be reached on each later
+  // leg. When several first departures lead to the same final trip, only the latest one is kept.
+  function findTrips(chain, opts) {
+    const earliest = Date.now() - 60000;
+    const firstWalk = (chain.legs[0].walk || 0) * 60000;
+    const byFinal = new Map();
+    for (const first of opts[0]) {
+      if (first.dep - firstWalk < earliest) continue;
+      const path = [first];
+      for (let i = 1; i < opts.length; i++) {
+        const ready = path[i - 1].arr.getTime() + (chain.legs[i].walk || 0) * 60000;
+        const next = opts[i].find(o => o.dep >= ready);
+        if (!next) break;
+        path.push(next);
+      }
+      if (path.length === opts.length) byFinal.set(tripKey(path.at(-1).call), path);
+    }
+    return [...byFinal.values()].sort((a, b) => a[0].dep - b[0].dep);
+  }
+
   async function refreshAll() {
-    const ids = [...new Set(config.boards.map(b => b.stopId).filter(Boolean))];
-    await Promise.all(ids.map(fetchStop));
+    const ids = new Set();
+    for (const b of config.boards) {
+      if (b.kind === "chain") b.legs.forEach(l => l.fromId && ids.add(l.fromId));
+      else if (b.stopId) ids.add(b.stopId);
+    }
+    await Promise.all([...ids].map(fetchStop));
+    const requests = new Map();
+    for (const b of config.boards) {
+      if (b.kind !== "chain") continue;
+      for (const leg of b.legs) {
+        const lineIds = legLineIds(leg);
+        if (leg.toId && lineIds.length) requests.set(arrKey(leg.toId, lineIds), [leg.toId, lineIds]);
+      }
+    }
+    await Promise.all([...requests.values()].map(([toId, lineIds]) => fetchArrivals(toId, lineIds)));
     renderBoards();
   }
 
@@ -381,13 +556,25 @@
     return parts.join(". ");
   }
 
+  function badgeEl(call) {
+    const mode = MODES[modeOf(call)];
+    const badge = h("span", { class: "badge", title: mode ? mode.name : "", text: call.serviceJourney?.line?.publicCode || "–" });
+    badge.style.background = mode ? mode.color : "#4b5563";
+    return badge;
+  }
+
+  function messageOf(call) {
+    const text = (call.situations || [])
+      .map(s => (s.summary || []).find(t => t.language === "no" || t.language === "nob") || s.summary?.[0])
+      .find(Boolean);
+    return text?.value || "";
+  }
+
   function rowEl(call) {
     const expected = new Date(call.expectedDepartureTime);
     const aimed = new Date(call.aimedDepartureTime);
     const minutes = Math.round((expected - Date.now()) / 60000);
     const delayed = expected - aimed >= 60000;
-    const line = call.serviceJourney?.line;
-    const mode = MODES[modeOf(call)];
 
     let time;
     if (call.cancellation) {
@@ -399,18 +586,13 @@
         delayed ? h("span", { class: "note late", text: "Rute " + clock(aimed) }) : null);
     }
 
-    const message = (call.situations || [])
-      .map(s => (s.summary || []).find(t => t.language === "no" || t.language === "nob") || s.summary?.[0])
-      .find(Boolean);
-
-    const badge = h("span", { class: "badge", title: mode ? mode.name : "", text: line?.publicCode || "–" });
-    badge.style.background = mode ? mode.color : "#4b5563";
+    const message = messageOf(call);
 
     return h("li", { class: "row" },
-      badge,
+      badgeEl(call),
       h("span", { class: "dest" + (call.cancellation ? " is-cancelled" : "") },
         call.destinationDisplay?.frontText || "",
-        message?.value ? h("span", { class: "note", text: message.value }) : null),
+        message ? h("span", { class: "note", text: message }) : null),
       h("span", { class: "plat", text: platformOf(call) || "–" }),
       time);
   }
@@ -473,18 +655,119 @@
     });
   }
 
-  function boardEl(board, index) {
-    const entry = stops.get(board.stopId);
-    const name = board.title || entry?.name || board.stopName || "Stoppested";
-    const sub = filterSummary(board, entry);
-
+  function boardShell(board, index, name, sub, meta, ...content) {
     const tools = editing ? h("div", { class: "tools" },
       h("button", { type: "button", class: "tool", "data-move": "-1", "aria-label": "Flytt tavla bakover", title: "Flytt bakover",
         disabled: index === 0, onclick: () => move(index, -1), text: "←" }),
       h("button", { type: "button", class: "tool", "data-move": "1", "aria-label": "Flytt tavla fremover", title: "Flytt fremover",
         disabled: index === config.boards.length - 1, onclick: () => move(index, 1), text: "→" }),
-      h("button", { type: "button", class: "tool", onclick: () => openEditor(board), text: "Endre" }),
+      h("button", { type: "button", class: "tool", text: "Endre",
+        onclick: () => board.kind === "chain" ? openChainEditor(board) : openEditor(board) }),
       removeButton(board)) : null;
+
+    const section = h("section", { class: "board" + (board.wide ? " wide" : ""), "data-id": board.id, "aria-label": name },
+      h("header", { class: "band" },
+        h("div", {}, h("h2", { class: "board-title", text: name }), sub ? h("p", { class: "board-sub", text: sub }) : null),
+        tools),
+      ...content,
+      h("p", { class: "board-meta", text: meta }));
+
+    if (editing) setupDrag(section, board.id);
+    return section;
+  }
+
+  // "Nå", "4 min" or a clock time; with a walk first, "Gå nå", "Gå om 4 min" or "Gå 12:31".
+  function countdown(time, walking) {
+    const minutes = Math.round((time - Date.now()) / 60000);
+    const label = minutes <= 0 ? "Nå" : minutes < 10 ? (walking ? "om " : "") + minutes + " min" : clock(time);
+    return { now: minutes <= 0, label: walking ? "Gå " + (minutes <= 0 ? "nå" : label) : label };
+  }
+
+  function legStepEl(leg, option) {
+    const { call } = option;
+    const aimed = new Date(call.aimedDepartureTime);
+    const late = Math.round((option.dep - aimed) / 60000);
+    const message = messageOf(call);
+    const from = stops.get(leg.fromId)?.name || leg.fromName;
+    return h("li", { class: "leg-step" },
+      badgeEl(call),
+      h("span", {},
+        h("b", { text: clock(option.dep) }),
+        late >= 1 ? h("span", { class: "late", title: "Rutetid " + clock(aimed), text: " +" + late }) : null,
+        " " + from + " → ",
+        h("b", { text: clock(option.arr) }),
+        " " + leg.toName,
+        message ? h("span", { class: "note", text: message }) : null),
+      h("span", { class: "plat", text: platformOf(call) ? "Spor " + platformOf(call) : "" }));
+  }
+
+  function tripEl(chain, path) {
+    const start = path[0];
+    const end = path.at(-1);
+    const firstWalk = chain.legs[0].walk || 0;
+    const leave = new Date(start.dep.getTime() - firstWalk * 60000);
+    const when = countdown(leave, firstWalk > 0);
+    const total = Math.round((end.arr - leave) / 60000);
+    const changes = path.length - 1;
+
+    const steps = [];
+    path.forEach((option, i) => {
+      if (i > 0) {
+        const walk = chain.legs[i].walk || 0;
+        const wait = Math.round((option.dep - path[i - 1].arr) / 60000) - walk;
+        steps.push(h("li", { class: "walk-step",
+          text: (walk ? "Gå og bytt, " + walk + " min" : "Bytte") + (wait >= 1 ? " · venter " + wait + " min" : "") }));
+      }
+      steps.push(legStepEl(chain.legs[i], option));
+    });
+
+    return h("li", { class: "trip" },
+      h("div", { class: "trip-head" },
+        h("span", { class: "trip-span" },
+          h("b", { text: clock(start.dep) + " – " + clock(end.arr) }),
+          h("span", { class: "note", text: total + " min" + (firstWalk ? " med gange" : "")
+            + (changes ? " · " + changes + (changes === 1 ? " bytte" : " bytter") : "") })),
+        h("span", { class: "time" + (when.now ? " now" : "") }, h("span", { class: "t-main", text: when.label }))),
+      h("ol", { class: "trip-legs" }, ...steps));
+  }
+
+  function chainEl(chain, index) {
+    const legs = chain.legs;
+    const route = legs[0].fromName + " → " + legs.at(-1).toName;
+    const name = chain.title || route;
+    const parts = [];
+    legs.forEach((leg, i) => {
+      if (i > 0 && leg.walk) parts.push(leg.walk + " min gange");
+      parts.push(leg.lines.length ? leg.lines.join("/") : "alle linjer");
+    });
+    const sub = (chain.title ? route + ". " : "") + parts.join(" → ");
+
+    const data = legs.map(leg => legOptions(leg));
+    let body;
+    let trips = [];
+    if (data.some(d => !d.opts)) {
+      body = h("p", { class: "board-msg", text: data.some(d => d.error)
+        ? "Fikk ikke hentet avganger akkurat nå. Prøver igjen om litt."
+        : "Henter avganger …" });
+    } else {
+      trips = findTrips(chain, data.map(d => d.opts)).slice(0, chain.rows);
+      body = trips.length
+        ? h("ol", { class: "rows" }, ...trips.map(path => tripEl(chain, path)))
+        : h("p", { class: "board-msg", text: "Ingen reiser der overgangene rekker å gå opp de neste timene." });
+    }
+
+    const entries = legs.flatMap(leg => [stops.get(leg.fromId), arrivals.get(arrKey(leg.toId, legLineIds(leg)))]);
+    const error = entries.find(e => e?.error)?.error;
+    const oldest = entries.every(e => e?.updated) ? new Date(Math.min(...entries.map(e => e.updated))) : null;
+    const meta = error || (oldest ? "Sanntid fra Entur, oppdatert " + clock(oldest) : "");
+    return boardShell(chain, index, name, sub, meta, body);
+  }
+
+  function boardEl(board, index) {
+    if (board.kind === "chain") return chainEl(board, index);
+    const entry = stops.get(board.stopId);
+    const name = board.title || entry?.name || board.stopName || "Stoppested";
+    const sub = filterSummary(board, entry);
 
     let body;
     let calls = [];
@@ -500,25 +783,23 @@
             : "Ingen avganger de neste 12 timene med disse filtrene." });
     }
 
-    const section = h("section", { class: "board" + (board.wide ? " wide" : ""), "data-id": board.id, "aria-label": name },
-      h("header", { class: "band" },
-        h("div", {}, h("h2", { class: "board-title", text: name }), sub ? h("p", { class: "board-sub", text: sub }) : null),
-        tools),
+    return boardShell(board, index, name, sub,
+      entry?.error || (entry?.updated ? "Sanntid fra Entur, oppdatert " + clock(entry.updated) : ""),
       calls.length ? h("div", { class: "cols", "aria-hidden": "true" },
         h("span", { text: "Linje" }), h("span", { text: "Til" }), h("span", { text: "Spor" }), h("span", { text: "Avgang" })) : null,
-      body,
-      h("p", { class: "board-meta", text: entry?.error || (entry?.updated ? "Sanntid fra Entur, oppdatert " + clock(entry.updated) : "") }));
-
-    if (editing) setupDrag(section, board.id);
-    return section;
+      body);
   }
 
   function renderBoards() {
     if (dragId) return; // don't rebuild under a drag in progress
     const items = config.boards.map(boardEl);
     if (editing) {
-      items.push(h("button", { type: "button", class: "add-tile", onclick: () => openEditor(null) },
-        h("span", { class: "plus", "aria-hidden": "true", text: "+" }), h("span", { text: "Legg til tavle" })));
+      items.push(
+        h("button", { type: "button", class: "add-tile", onclick: () => openEditor(null) },
+          h("span", { class: "plus", "aria-hidden": "true", text: "+" }), h("span", { text: "Legg til tavle" })),
+        h("button", { type: "button", class: "add-tile", onclick: () => openChainEditor(null) },
+          h("span", { class: "plus", "aria-hidden": "true", text: "+" }), h("span", { text: "Legg til reise" }),
+          h("span", { class: "opt", text: "Flere etapper med bytte" })));
     } else if (!config.boards.length) {
       items.push(h("p", { class: "empty", text: "Ingen tavler ennå. Trykk «Rediger» for å legge til en." }));
     }
@@ -558,18 +839,155 @@
     $(".date").textContent = date.charAt(0).toUpperCase() + date.slice(1);
   }
 
-  // ---------- editor dialog ----------
+  // ---------- stop search (combobox) ----------
+  let pickerCount = 0;
+
+  function createStopPicker({ label, onChoose }) {
+    const n = ++pickerCount;
+    const input = h("input", { id: "stop-input-" + n, type: "text", role: "combobox", "aria-autocomplete": "list",
+      "aria-expanded": "false", "aria-controls": "stop-results-" + n, autocomplete: "off", spellcheck: "false",
+      placeholder: "Søk etter stasjon eller holdeplass" });
+    const list = h("ul", { id: "stop-results-" + n, class: "results", role: "listbox", hidden: true });
+    const status = h("p", { class: "hint", role: "status" });
+    const box = h("div", { class: "combo-box" }, input, list);
+    const el = h("div", { class: "field" }, h("label", { for: input.id, text: label }), box, status);
+
+    let current = "";
+    let matches = [];
+    let active = -1;
+    let timer;
+    let seq = 0;
+
+    function close() {
+      list.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      input.removeAttribute("aria-activedescendant");
+      active = -1;
+      status.textContent = "";
+    }
+
+    function highlight(index) {
+      active = index;
+      Array.from(list.children).forEach((option, i) => option.setAttribute("aria-selected", String(i === active)));
+      if (active >= 0) {
+        input.setAttribute("aria-activedescendant", list.children[active].id);
+        list.children[active].scrollIntoView({ block: "nearest" });
+      } else {
+        input.removeAttribute("aria-activedescendant");
+      }
+    }
+
+    function show() {
+      list.replaceChildren(...matches.map((place, index) => {
+        const kinds = [...new Set((place.category || []).map(c => MODES[CATEGORY_MODE[c]]?.name).filter(Boolean))];
+        const option = h("li", { id: `stop-option-${n}-${index}`, role: "option", "aria-selected": "false" },
+          h("span", { text: place.name }),
+          h("small", { text: [kinds.join(", "), place.locality].filter(Boolean).join(", ") }));
+        option.addEventListener("mousedown", event => event.preventDefault());
+        option.addEventListener("click", () => choose(place));
+        return option;
+      }));
+      list.hidden = matches.length === 0;
+      input.setAttribute("aria-expanded", String(matches.length > 0));
+      highlight(-1);
+      status.textContent = matches.length ? "" : "Fant ingen stoppesteder med det navnet.";
+    }
+
+    async function search(text) {
+      const mine = ++seq;
+      try {
+        const url = GEOCODER + "?" + new URLSearchParams({ text, layers: "venue", size: "12", lang: "no" });
+        const response = await fetch(url, { headers: { "ET-Client-Name": CLIENT_NAME } });
+        const json = await response.json();
+        if (mine !== seq) return;
+        matches = (json.features || [])
+          .map(feature => feature.properties)
+          .filter(place => place.id && place.id.startsWith("NSR:StopPlace:"));
+        show();
+      } catch {
+        if (mine === seq) status.textContent = "Søket feilet. Sjekk nettforbindelsen og prøv igjen.";
+      }
+    }
+
+    function choose(place) {
+      input.value = current = place.name;
+      close();
+      onChoose(place);
+    }
+
+    function restore() {
+      input.value = current;
+      seq++;
+      close();
+    }
+
+    input.addEventListener("focus", () => input.select());
+    input.addEventListener("input", () => {
+      clearTimeout(timer);
+      const text = input.value.trim();
+      if (text.length < 2) { seq++; close(); return; }
+      timer = setTimeout(() => search(text), 250);
+    });
+    input.addEventListener("keydown", event => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        if (list.hidden || !matches.length) return;
+        event.preventDefault();
+        const step = event.key === "ArrowDown" ? 1 : -1;
+        highlight(active < 0 ? (step > 0 ? 0 : matches.length - 1) : (active + step + matches.length) % matches.length);
+      } else if (event.key === "Enter" && !list.hidden) {
+        event.preventDefault();
+        if (active >= 0) choose(matches[active]);
+        else if (matches.length === 1) choose(matches[0]);
+      } else if (event.key === "Escape" && !list.hidden) {
+        event.preventDefault();
+        restore();
+      }
+    });
+    input.addEventListener("blur", () => {
+      setTimeout(() => { if (document.activeElement !== input && input.isConnected) restore(); }, 150);
+    });
+
+    const picker = {
+      el, input, restore,
+      get open() { return !list.hidden; },
+      set(name) { input.value = current = name || ""; seq++; close(); },
+    };
+    box.picker = picker;
+    return picker;
+  }
+
+  // Closing on the backdrop, and Escape closing an open stop list before the dialog itself.
+  function setupDialog(dialogEl) {
+    $('[data-act="cancel"]', dialogEl).addEventListener("click", () => dialogEl.close());
+    dialogEl.addEventListener("click", event => { if (event.target === dialogEl) dialogEl.close(); });
+    dialogEl.addEventListener("cancel", event => {
+      const open = [...dialogEl.querySelectorAll(".combo-box")].map(box => box.picker).filter(p => p?.open);
+      if (open.length) { event.preventDefault(); open.forEach(p => p.restore()); }
+    });
+  }
+
+  // ---------- board editor dialog ----------
   const dialog = $(".editor");
   const heading = $("#editor-heading");
-  const stopInput = $("#stop-input");
-  const results = $("#stop-results");
-  const stopStatus = $("#stop-status");
   const titleInput = $("#title-input");
   const rowsSelect = $("#rows-select");
   const widthSelect = $("#width-select");
   const filterHint = $("#filter-hint");
   const saveBtn = $('[data-act="save"]', dialog);
   let draft = null;
+
+  const stopPicker = createStopPicker({ label: "Stoppested", onChoose: place => {
+    if (place.id === draft.stopId) return;
+    draft.stopId = place.id;
+    draft.stopName = place.name;
+    draft.lines = [];
+    draft.lineDest = {};
+    draft.platforms = [];
+    saveBtn.disabled = false;
+    renderDraftChips();
+    loadDraftOptions(place.id);
+  } });
+  $(".stop-slot", dialog).replaceWith(stopPicker.el);
 
   const CHIP_KINDS = [
     ["modes", modeOf, v => MODES[v]?.name || v, (a, b) => MODE_ORDER.indexOf(a) - MODE_ORDER.indexOf(b)],
@@ -639,23 +1057,18 @@
       : newBoard();
     heading.textContent = board ? "Endre tavle" : "Ny tavle";
     saveBtn.textContent = board ? "Lagre endringer" : "Legg til tavle";
-    stopInput.value = draft.stopName || stops.get(draft.stopId)?.name || "";
+    stopPicker.set(draft.stopName || stops.get(draft.stopId)?.name || "");
     titleInput.value = draft.title;
     rowsSelect.value = String(draft.rows);
     widthSelect.value = draft.wide ? "wide" : "normal";
-    closeList();
     renderDraftChips();
     saveBtn.disabled = !draft.stopId;
     dialog.showModal();
     if (draft.stopId) loadDraftOptions(draft.stopId);
-    else stopInput.focus();
+    else stopPicker.input.focus();
   }
 
-  $('[data-act="cancel"]', dialog).addEventListener("click", () => dialog.close());
-  dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); });
-  dialog.addEventListener("cancel", event => {
-    if (!results.hidden) { event.preventDefault(); restoreInput(); }
-  });
+  setupDialog(dialog);
 
   saveBtn.addEventListener("click", () => {
     if (!draft?.stopId) return;
@@ -671,107 +1084,131 @@
     if (!stops.get(draft.stopId)?.updated) fetchStop(draft.stopId).then(renderBoards);
   });
 
-  // Stop search combobox
-  let matches = [];
-  let active = -1;
-  let searchTimer;
-  let searchSeq = 0;
+  // ---------- travel chain editor dialog ----------
+  const chainDialog = $(".chain-editor");
+  const chainHeading = $("#chain-heading");
+  const chainTitle = $("#chain-title");
+  const chainRows = $("#chain-rows");
+  const chainWidth = $("#chain-width");
+  const chainLegsEl = $(".legs-edit", chainDialog);
+  const chainSave = $('[data-act="save"]', chainDialog);
+  let chainDraft = null;
 
-  function closeList() {
-    results.hidden = true;
-    stopInput.setAttribute("aria-expanded", "false");
-    stopInput.removeAttribute("aria-activedescendant");
-    active = -1;
-    stopStatus.textContent = "";
-  }
+  const legComplete = leg => leg.fromId && leg.toId;
+  const updateChainSave = () => { chainSave.disabled = !chainDraft.legs.every(legComplete); };
 
-  function highlight(index) {
-    active = index;
-    Array.from(results.children).forEach((option, i) => option.setAttribute("aria-selected", String(i === active)));
-    if (active >= 0) {
-      stopInput.setAttribute("aria-activedescendant", results.children[active].id);
-      results.children[active].scrollIntoView({ block: "nearest" });
-    } else {
-      stopInput.removeAttribute("aria-activedescendant");
-    }
-  }
-
-  function showMatches() {
-    results.replaceChildren(...matches.map((place, index) => {
-      const kinds = [...new Set((place.category || []).map(c => MODES[CATEGORY_MODE[c]]?.name).filter(Boolean))];
-      const option = h("li", { id: "stop-option-" + index, role: "option", "aria-selected": "false" },
-        h("span", { text: place.name }),
-        h("small", { text: [kinds.join(", "), place.locality].filter(Boolean).join(", ") }));
-      option.addEventListener("mousedown", event => event.preventDefault());
-      option.addEventListener("click", () => choose(place));
-      return option;
+  function renderChainLegs() {
+    chainLegsEl.replaceChildren(...chainDraft.legs.map((leg, i) => {
+      const from = createStopPicker({ label: "Fra", onChoose: place => setLegStop(leg, "from", place) });
+      const to = createStopPicker({ label: "Til", onChoose: place => setLegStop(leg, "to", place) });
+      from.set(leg.fromName);
+      to.set(leg.toName);
+      const walk = h("input", { id: "walk-" + leg.id, class: "walk-input", type: "number", min: "0", max: "120", step: "1",
+        inputmode: "numeric", value: String(leg.walk) });
+      walk.addEventListener("input", () => { leg.walk = Math.max(0, Math.min(120, parseInt(walk.value, 10) || 0)); });
+      return h("div", { class: "leg-edit", "data-leg": leg.id },
+        h("div", { class: "leg-edit-head" },
+          h("h3", { text: "Etappe " + (i + 1) }),
+          chainDraft.legs.length > 1 ? h("button", { type: "button", class: "btn ghost small", text: "Fjern etappe",
+            onclick: () => { chainDraft.legs.splice(i, 1); renderChainLegs(); } }) : null),
+        h("div", { class: "field" },
+          h("label", { for: walk.id, text: i === 0 ? "Gangtid til første stopp, minutter" : "Gange og bytte fra forrige etappe, minutter" }),
+          walk),
+        from.el,
+        to.el,
+        h("div", { class: "field leg-lines" },
+          h("span", { class: "field-label", text: "Linjer" }),
+          h("div", { class: "chips" }),
+          h("p", { class: "hint" })));
     }));
-    results.hidden = matches.length === 0;
-    stopInput.setAttribute("aria-expanded", String(matches.length > 0));
-    highlight(-1);
-    stopStatus.textContent = matches.length ? "" : "Fant ingen stoppesteder med det navnet.";
+    chainDraft.legs.forEach(renderLegChips);
+    updateChainSave();
   }
 
-  async function search(text) {
-    const seq = ++searchSeq;
-    try {
-      const url = GEOCODER + "?" + new URLSearchParams({ text, layers: "venue", size: "12", lang: "no" });
-      const response = await fetch(url, { headers: { "ET-Client-Name": CLIENT_NAME } });
-      const json = await response.json();
-      if (seq !== searchSeq) return;
-      matches = (json.features || [])
-        .map(feature => feature.properties)
-        .filter(place => place.id && place.id.startsWith("NSR:StopPlace:"));
-      showMatches();
-    } catch {
-      if (seq === searchSeq) stopStatus.textContent = "Søket feilet. Sjekk nettforbindelsen og prøv igjen.";
+  function setLegStop(leg, end, place) {
+    if (leg[end + "Id"] === place.id) return;
+    leg[end + "Id"] = place.id;
+    leg[end + "Name"] = place.name;
+    if (end === "from") leg.lines = [];
+    renderLegChips(leg);
+    updateChainSave();
+    loadLegOptions(leg);
+  }
+
+  // Line chips list only the lines that run directly from the leg's start to its end.
+  function renderLegChips(leg) {
+    const box = chainLegsEl.querySelector(`[data-leg="${leg.id}"] .leg-lines`);
+    if (!box) return;
+    const codes = new Set(leg.lines);
+    let hint;
+    if (!legComplete(leg)) {
+      hint = "Velg fra og til, så ser du hvilke linjer som går direkte mellom dem.";
+    } else {
+      const { opts, error } = legOptions(leg, true);
+      if (!opts) hint = error ? "Fikk ikke hentet linjer akkurat nå." : "Henter linjer …";
+      else {
+        opts.forEach(o => codes.add(lineCode(o.call)));
+        hint = opts.length
+          ? "Trykk for å velge. Velger du ingen, brukes alle linjene som går hit."
+          : "Fant ingen direkte avganger mellom disse de neste 12 timene. Store knutepunkt er delt i flere stopp i Entur, for eksempel Oslo S for tog og Jernbanetorget for T-bane, trikk og buss.";
+      }
     }
+    box.querySelector(".chips").replaceChildren(...[...codes].sort(byNatural).map(code => {
+      const on = leg.lines.includes(code);
+      return h("button", { type: "button", class: "chip", "aria-pressed": String(on), text: code,
+        onclick: () => { leg.lines = on ? leg.lines.filter(x => x !== code) : [...leg.lines, code]; renderLegChips(leg); } });
+    }));
+    box.querySelector(".hint").textContent = hint;
   }
 
-  function choose(place) {
-    stopInput.value = place.name;
-    closeList();
-    if (place.id === draft.stopId) return;
-    draft.stopId = place.id;
-    draft.stopName = place.name;
-    draft.lines = [];
-    draft.lineDest = {};
-    draft.platforms = [];
-    saveBtn.disabled = false;
-    renderDraftChips();
-    loadDraftOptions(place.id);
-  }
-
-  function restoreInput() {
-    stopInput.value = draft?.stopName || "";
-    searchSeq++;
-    closeList();
-  }
-
-  stopInput.addEventListener("focus", () => stopInput.select());
-  stopInput.addEventListener("input", () => {
-    clearTimeout(searchTimer);
-    const text = stopInput.value.trim();
-    if (text.length < 2) { searchSeq++; closeList(); return; }
-    searchTimer = setTimeout(() => search(text), 250);
-  });
-  stopInput.addEventListener("keydown", event => {
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      if (results.hidden || !matches.length) return;
-      event.preventDefault();
-      const step = event.key === "ArrowDown" ? 1 : -1;
-      highlight(active < 0 ? (step > 0 ? 0 : matches.length - 1) : (active + step + matches.length) % matches.length);
-    } else if (event.key === "Enter" && !results.hidden) {
-      event.preventDefault();
-      if (active >= 0) choose(matches[active]);
-      else if (matches.length === 1) choose(matches[0]);
-    } else if (event.key === "Escape" && !results.hidden) {
-      event.preventDefault();
-      restoreInput();
+  async function loadLegOptions(leg) {
+    if (!leg.fromId) return;
+    if (!stops.get(leg.fromId)?.updated) {
+      await fetchStop(leg.fromId);
+      if (!chainDialog.open) return;
+      renderLegChips(leg);
     }
+    if (!leg.toId) return;
+    const ids = legLineIds(leg, true);
+    if (!ids.length || arrivals.get(arrKey(leg.toId, ids))?.updated) return;
+    await fetchArrivals(leg.toId, ids);
+    if (chainDialog.open) renderLegChips(leg);
+  }
+
+  function openChainEditor(chain) {
+    chainDraft = chain ? newChain(JSON.parse(JSON.stringify(chain))) : newChain();
+    chainHeading.textContent = chain ? "Endre reise" : "Ny reise";
+    chainSave.textContent = chain ? "Lagre endringer" : "Legg til reise";
+    chainTitle.value = chainDraft.title;
+    chainRows.value = String(chainDraft.rows);
+    chainWidth.value = chainDraft.wide ? "wide" : "normal";
+    renderChainLegs();
+    chainDialog.showModal();
+    chainDraft.legs.forEach(loadLegOptions);
+    if (!chain) $('[role="combobox"]', chainLegsEl).focus();
+  }
+
+  setupDialog(chainDialog);
+
+  $(".add-leg", chainDialog).addEventListener("click", () => {
+    const leg = newLeg({ walk: 5 });
+    chainDraft.legs.push(leg);
+    renderChainLegs();
+    $(`[data-leg="${leg.id}"] [role="combobox"]`, chainLegsEl).focus();
   });
-  stopInput.addEventListener("blur", () => {
-    setTimeout(() => { if (document.activeElement !== stopInput && dialog.open) restoreInput(); }, 150);
+
+  chainSave.addEventListener("click", () => {
+    if (!chainDraft?.legs.every(legComplete)) return;
+    chainDraft.title = chainTitle.value.trim();
+    chainDraft.rows = Number(chainRows.value);
+    chainDraft.wide = chainWidth.value === "wide";
+    const index = config.boards.findIndex(b => b.id === chainDraft.id);
+    if (index >= 0) config.boards[index] = chainDraft;
+    else config.boards.push(chainDraft);
+    saveConfig();
+    chainDialog.close();
+    renderBoards();
+    refreshAll();
   });
 
   // ---------- GitHub button ----------
